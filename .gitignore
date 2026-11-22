@@ -1,0 +1,24 @@
+# Android / Gradle
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+android/.idea/
+*.keystore
+*.jks
+
+# Go PC Bridge
+pc-bridge/dist/
+pc-bridge/*.exe
+
+# OBS Studio Plugin
+obs-plugin/build/
+obs-plugin/dist/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+*~
+*.swp

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AndroidWebCamera</string>
+    <string name="notification_channel_name">Трансляция камеры</string>
+    <string name="notification_channel_desc">Фоновая трансляция видеопотока с камеры по сети или USB</string>
+    <string name="notification_title_streaming">AndroidWebCamera — трансляция активна</string>
+    <string name="action_stop">Остановить</string>
+</resources>

@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AndroidWebCamera</title>
+  <style>
+    :root {
+      --bg: #111318;
+      --surface: #1b1f27;
+      --surface-high: #262b36;
+      --primary: #9fcaff;
+      --on-primary: #003258;
+      --primary-container: #00497d;
+      --on-primary-container: #d1e4ff;
+      --text: #e3e2e6;
+      --text-muted: #9ca3af;
+      --border: #323846;
+      --success: #7ee787;
+      --error: #ffb4ab;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--text-muted);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .brand-dot.live {
+      background: var(--success);
+      box-shadow: 0 0 12px rgba(126, 231, 135, 0.7);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.125rem;
+      font-weight: 600;
+    }
+
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .badge {
+      padding: 5px 11px;
+      border-radius: 999px;
+      background: var(--surface-high);
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+
+    .badge.accent {
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+      border-color: transparent;
+      font-weight: 600;
+    }
+
+    main {
+      width: 100%;
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+      flex: 1;
+    }
+
+    .stage-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .viewport {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      max-height: 74vh;
+      background: #080a0d;
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .viewport canvas,
+    .viewport video,
+    .viewport img {
+      max-width: 100%;
+      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: none;
+      transition: transform 0.15s ease;
+    }
+
+    .viewport canvas.active,
+    .viewport video.active,
+    .viewport img.active {
+      display: block;
+    }
+
+    .overlay-msg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 20px;
+      text-align: center;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .overlay-msg.hidden {
+      display: none;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .card h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 10px;
+    }
+
+    label {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    select, button {
+      font: inherit;
+      color: var(--text);
+      background: var(--surface-high);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 9px 12px;
+      cursor: pointer;
+    }
+
+    select:focus, button:focus {
+      outline: 2px solid var(--primary);
+      outline-offset: 1px;
+    }
+
+    button:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+    }
+
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip-btn {
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+
+    .chip-btn.selected {
+      background: var(--primary);
+      color: var(--on-primary);
+      border-color: var(--primary);
+      font-weight: 600;
+    }
+
+    .url-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      background: var(--surface-high);
+      border-radius: 12px;
+      padding: 9px 12px;
+    }
+
+    .url-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem;
+    }
+
+    .url-label {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      margin-bottom: 2px;
+    }
+
+    .copy-btn {
+      flex-shrink: 0;
+      padding: 6px 10px;
+      font-size: 0.8rem;
+    }
+
+    .error-banner {
+      display: none;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: rgba(255, 180, 171, 0.14);
+      border: 1px solid rgba(255, 180, 171, 0.4);
+      color: var(--error);
+      font-size: 0.88rem;
+    }
+
+    .error-banner.visible {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-dot" id="liveDot"></div>
+      <h1>AndroidWebCamera</h1>
+    </div>
+    <div class="badges">
+      <span class="badge" id="statusBadge">Подключение...</span>
+      <span class="badge accent" id="decoderBadge">Режим: авто</span>
+      <span class="badge" id="clientsBadge">Клиентов: 0</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="stage-card">
+      <div class="error-banner" id="errorBanner">
+        <span id="errorText"></span>
+        <div class="btn-row">
+          <button id="fallbackH264Btn" class="chip-btn" type="button">H.264</button>
+          <button id="fallbackMjpegBtn" class="chip-btn" type="button">MJPEG</button>
+        </div>
+      </div>
+
+      <div class="viewport" id="viewport">
+        <canvas id="wcCanvas"></canvas>
+        <video id="mseVideo" autoplay muted playsinline></video>
+        <img id="mjpegImg" alt="Camera MJPEG Stream" />
+        <div class="overlay-msg" id="overlayMsg">
+          <strong id="overlayTitle">Ожидание видеопотока...</strong>
+          <span id="overlaySub">Убедитесь, что трансляция запущена на телефоне</span>
+        </div>
+      </div>
+
+      <div class="btn-row" style="justify-content: space-between; align-items: center;">
+        <span style="font-size: 0.84rem; color: var(--text-muted);" id="streamInfoText">—</span>
+        <div class="btn-row">
+          <button id="reconnectBtn" type="button">Переподключить</button>
+          <button id="fullscreenBtn" type="button">Полный экран</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <h2>Управление камерой</h2>
+
+        <div class="field">
+          <label for="cameraSelect">Камера</label>
+          <select id="cameraSelect"></select>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="resolutionSelect">Разрешение</label>
+            <select id="resolutionSelect"></select>
+          </div>
+          <div class="field">
+            <label for="fpsSelect">FPS</label>
+            <select id="fpsSelect"></select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Кодек потока</label>
+          <div class="btn-row" id="codecButtons">
+            <button type="button" class="chip-btn" data-codec="h264">H.264</button>
+            <button type="button" class="chip-btn" data-codec="h265">H.265 (HEVC)</button>
+            <button type="button" class="chip-btn" data-codec="av1">AV1</button>
+            <button type="button" class="chip-btn" data-codec="mjpeg">MJPEG</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Поворот видео</label>
+          <div class="btn-row">
+            <button type="button" class="chip-btn" data-rot="0">0°</button>
+            <button type="button" class="chip-btn" data-rot="90">90°</button>
+            <button type="button" class="chip-btn" data-rot="180">180°</button>
+            <button type="button" class="chip-btn" data-rot="270">270°</button>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button type="button" class="chip-btn" id="mirrorBtn">Зеркало: Выкл</button>
+          <button type="button" class="chip-btn" id="torchBtn">Фонарик: Выкл</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Ссылки для OBS / VLC / FFmpeg</h2>
+        <div id="urlsContainer" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+
+      // =========================================================================
+      // Bitstream & ISO BMFF / fMP4 Primitives (H.264 / H.265 / AV1)
+      // =========================================================================
+
+      class BitReader {
+        constructor(bytes) {
+          this.bytes = bytes;
+          this.bitPos = 0;
+        }
+        readBits(n) {
+          let v = 0;
+          for (let i = 0; i < n; i++) {
+            const byteIdx = this.bitPos >>> 3;
+            if (byteIdx >= this.bytes.length) return v;
+            const bit = (this.bytes[byteIdx] >>> (7 - (this.bitPos & 7))) & 1;
+            v = (v * 2) + bit;
+            this.bitPos++;
+          }
+          return v;
+        }
+        skipBits(n) {
+          this.bitPos += n;
+        }
+        readUvlc() {
+          let leadingZeros = 0;
+          while (this.bitPos < this.bytes.length * 8 && this.readBits(1) === 0 && leadingZeros < 32) {
+            leadingZeros++;
+          }
+          if (leadingZeros >= 32) return 0xffffffff;
+          const val = this.readBits(leadingZeros);
+          return val + ((1 << leadingZeros) - 1);
+        }
+      }
+
+      /** Strips 0x03 emulation prevention bytes from H.264 / H.265 NAL RBSP. */
+      function removeEmulationPreventionBytes(data) {
+        const out = [];
+        for (let i = 0; i < data.length; i++) {
+          if (i >= 2 && data[i] === 0x03 && data[i - 1] === 0x00 && data[i - 2] === 0x00) {
+            continue;
+          }
+          out.push(data[i]);
+        }
+        return new Uint8Array(out);
+      }
+
+      /** Splits an Annex-B buffer (H.264 or H.265) into raw NAL units without start codes. */
+      function parseAnnexBNals(buffer) {
+        const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        const nals = [];
+        const starts = [];
+        let i = 0;
+        while (i + 2 < bytes.length) {
+          if (bytes[i] === 0 && bytes[i + 1] === 0) {
+            if (bytes[i + 2] === 1) {
+              starts.push({ pos: i, len: 3 });
+              i += 3;
+              continue;
+            }
+            if (i + 3 < bytes.length && bytes[i + 2] === 0 && bytes[i + 3] === 1) {
+              starts.push({ pos: i, len: 4 });
+              i += 4;
+              continue;
+            }
+          }
+          i++;
+        }
+        for (let idx = 0; idx < starts.length; idx++) {
+          const nalStart = starts[idx].pos + starts[idx].len;
+          const nalEnd = idx + 1 < starts.length ? starts[idx + 1].pos : bytes.length;
+          if (nalEnd > nalStart) {
+            nals.push(bytes.subarray(nalStart, nalEnd));
+          }
+        }
+        return nals;
+      }
+
+      /** Encodes an array of NAL units into 4-byte length-prefixed AVCC / HVCC payload. */
+      function nalsToAvcc(nals) {
+        let total = 0;
+        for (const nal of nals) total += 4 + nal.length;
+        const out = new Uint8Array(total);
+        const view = new DataView(out.buffer);
+        let offset = 0;
+        for (const nal of nals) {
+          view.setUint32(offset, nal.length, false);
+          offset += 4;
+          out.set(nal, offset);
+          offset += nal.length;
+        }
+        return out;
+      }
+
+      /** Builds an ISO 14496-15 avcC decoder configuration record from raw H.264 SPS and PPS NALUs. */
+      function buildAvccRecord(sps, pps) {
+        const out = new Uint8Array(11 + sps.length + pps.length);
+        const view = new DataView(out.buffer);
+        out[0] = 1; // configurationVersion
+        out[1] = sps.length > 1 ? sps[1] : 0x42; // AVCProfileIndication
+        out[2] = sps.length > 2 ? sps[2] : 0x00; // profile_compatibility
+        out[3] = sps.length > 3 ? sps[3] : 0x1f; // AVCLevelIndication
+        out[4] = 0xff; // 6 reserved bits + lengthSizeMinusOne=3 (4 bytes)
+        out[5] = 0xe1; // 3 reserved bits + numOfSequenceParameterSets=1
+        view.setUint16(6, sps.length, false);
+        out.set(sps, 8);
+        let pos = 8 + sps.length;
+        out[pos++] = 1; // numOfPictureParameterSets
+        view.setUint16(pos, pps.length, false);
+        pos += 2;
+        out.set(pps, pos);
+        return out;
+      }
+
+      function avcCodecString(sps) {
+        const p = (sps.length > 1 ? sps[1] : 0x42).toString(16).padStart(2, "0");
+        const c = (sps.length > 2 ? sps[2] : 0x00).toString(16).padStart(2, "0");
+        const l = (sps.length > 3 ? sps[3] : 0x1f).toString(16).padStart(2, "0");
+        return "avc1." + p + c + l;
+      }
+
+      /** Parses profile_tier_level fields from a raw HEVC SPS NALU (NAL type 33). */
+      function parseHevcSps(sps) {
+        const defaults = {
+          generalProfileSpace: 0,
+          generalTierFlag: 0,
+          generalProfileIdc: 1,
+          generalProfileCompatibilityFlags: 0x60000000,
+          constraintBytes: new Uint8Array([0x90, 0x00, 0x00, 0x00, 0x00, 0x00]),
+          generalLevelIdc: 93,
+          chromaFormat: 1,
+          bitDepthLumaMinus8: 0,
+          bitDepthChromaMinus8: 0
+        };
+        if (!sps || sps.length < 15) return defaults;
+        const rbsp = removeEmulationPreventionBytes(sps.subarray(2));
+        if (rbsp.length < 13) return defaults;
+
+        const br = new BitReader(rbsp);
+        br.skipBits(4); // sps_video_parameter_set_id
+        br.skipBits(3); // sps_max_sub_layers_minus1
+        br.skipBits(1); // sps_temporal_id_nesting_flag
+
+        const generalProfileSpace = br.readBits(2);
+        const generalTierFlag = br.readBits(1);
+        const generalProfileIdc = br.readBits(5);
+        const generalProfileCompatibilityFlags = br.readBits(32) >>> 0;
+        const constraintBytes = new Uint8Array(6);
+        for (let i = 0; i < 6; i++) {
+          constraintBytes[i] = br.readBits(8);
+        }
+        const generalLevelIdc = br.readBits(8);
+        return {
+          generalProfileSpace,
+          generalTierFlag,
+          generalProfileIdc,
+          generalProfileCompatibilityFlags,
+          constraintBytes,
+          generalLevelIdc,
+          chromaFormat: 1,
+          bitDepthLumaMinus8: 0,
+          bitDepthChromaMinus8: 0
+        };
+      }
+
+      function reverseBits32(v) {
+        let out = 0;
+        for (let i = 0; i < 32; i++) {
+          out = (out * 2) + ((v >>> i) & 1);
+        }
+        return out >>> 0;
+      }
+
+      /** Builds RFC 6381 / ISO 14496-15 Annex E.3 HEVC codec string (e.g. hvc1.1.6.L93.90). */
+      function hevcCodecString(sps, prefix = "hvc1") {
+        const info = parseHevcSps(sps);
+        const spaceMap = ["", "A", "B", "C"];
+        const profilePart = (spaceMap[info.generalProfileSpace] || "") + info.generalProfileIdc;
+        const compatHex = reverseBits32(info.generalProfileCompatibilityFlags).toString(16).toUpperCase();
+        const tierLevel = (info.generalTierFlag ? "H" : "L") + info.generalLevelIdc;
+
+        let lastNonZero = info.constraintBytes.length - 1;
+        while (lastNonZero > 0 && info.constraintBytes[lastNonZero] === 0) {
+          lastNonZero--;
+        }
+        const constraintParts = [];
+        for (let i = 0; i <= lastNonZero; i++) {
+          constraintParts.push(info.constraintBytes[i].toString(16).toUpperCase());
+        }
+        return `${prefix}.${profilePart}.${compatHex}.${tierLevel}.${constraintParts.join(".")}`;
+      }
+
+      /** Builds an ISO 14496-15 hvcC decoder configuration record from HEVC VPS, SPS, and PPS NALUs. */
+      function buildHvccRecord(vps, sps, pps) {
+        const info = parseHevcSps(sps);
+        const arrays = [];
+        if (vps && vps.length > 0) arrays.push({ type: 32, nal: vps });
+        if (sps && sps.length > 0) arrays.push({ type: 33, nal: sps });
+        if (pps && pps.length > 0) arrays.push({ type: 34, nal: pps });
+
+        let totalLen = 23;
+        for (const a of arrays) totalLen += 5 + a.nal.length;
+
+        const out = new Uint8Array(totalLen);
+        const view = new DataView(out.buffer);
+        out[0] = 1; // configurationVersion
+        out[1] = ((info.generalProfileSpace & 0x03) << 6) |
+          ((info.generalTierFlag & 0x01) << 5) |
+          (info.generalProfileIdc & 0x1f);
+        view.setUint32(2, info.generalProfileCompatibilityFlags >>> 0, false);
+        out.set(info.constraintBytes, 6);
+        out[12] = info.generalLevelIdc & 0xff;
+        view.setUint16(13, 0xf000, false); // min_spatial_segmentation_idc = 0
+        out[15] = 0xfc; // parallelismType = 0
+        out[16] = 0xfc | (info.chromaFormat & 0x03);
+        out[17] = 0xf8 | (info.bitDepthLumaMinus8 & 0x07);
+        out[18] = 0xf8 | (info.bitDepthChromaMinus8 & 0x07);
+        view.setUint16(19, 0, false); // avgFrameRate
+        out[21] = 0x0f; // constantFrameRate=0, numTemporalLayers=1, temporalIdNested=1, lengthSizeMinusOne=3 (4B)
+        out[22] = arrays.length;
+
+        let offset = 23;
+        for (const a of arrays) {
+          out[offset++] = 0x80 | (a.type & 0x3f); // array_completeness=1
+          view.setUint16(offset, 1, false);
+          offset += 2;
+          view.setUint16(offset, a.nal.length, false);
+          offset += 2;
+          out.set(a.nal, offset);
+          offset += a.nal.length;
+        }
+        return out;
+      }
+
+      /** Parses AV1 OBU units from a raw temporal unit buffer. */
+      function parseAv1Obus(buffer) {
+        const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        const obus = [];
+        let pos = 0;
+        while (pos < bytes.length) {
+          const start = pos;
+          const header = bytes[pos++];
+          if ((header & 0x80) !== 0) break;
+          const type = (header >>> 3) & 0x0f;
+          const hasExt = (header & 0x04) !== 0;
+          const hasSize = (header & 0x02) !== 0;
+          if (hasExt) {
+            if (pos >= bytes.length) break;
+            pos++;
+          }
+          let payloadLen = 0;
+          if (hasSize) {
+            let shift = 0;
+            let ok = false;
+            while (pos < bytes.length && shift < 56) {
+              const b = bytes[pos++];
+              payloadLen |= (b & 0x7f) << shift;
+              shift += 7;
+              if ((b & 0x80) === 0) {
+                ok = true;
+                break;
+              }
+            }
+            if (!ok || payloadLen < 0 || pos + payloadLen > bytes.length) break;
+          } else {
+            payloadLen = bytes.length - pos;
+          }
+          const payload = bytes.subarray(pos, pos + payloadLen);
+          const end = pos + payloadLen;
+          obus.push({ type, payload, raw: bytes.subarray(start, end) });
+          pos = end;
+        }
+        return obus;
+      }
+
+      /** Strips OBU_TEMPORAL_DELIMITER (type 2) for ISO BMFF AV1 samples. */
+      function stripAv1TemporalDelimiter(buffer) {
+        const obus = parseAv1Obus(buffer);
+        const kept = obus.filter((o) => o.type !== 2);
+        if (kept.length === obus.length) {
+          return buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+        }
+        let total = 0;
+        for (const o of kept) total += o.raw.length;
+        const out = new Uint8Array(total);
+        let offset = 0;
+        for (const o of kept) {
+          out.set(o.raw, offset);
+          offset += o.raw.length;
+        }
+        return out;
+      }
+
+      /** Parses seq_profile, seq_level_idx, seq_tier from an AV1 OBU_SEQUENCE_HEADER payload. */
+      function parseAv1SeqHeader(seqObuOrPayload) {
+        let payload = seqObuOrPayload;
+        if (seqObuOrPayload && seqObuOrPayload.payload) {
+          payload = seqObuOrPayload.payload;
+        } else if (seqObuOrPayload instanceof Uint8Array) {
+          const obus = parseAv1Obus(seqObuOrPayload);
+          const seq = obus.find((o) => o.type === 1);
+          if (seq) payload = seq.payload;
+        }
+        const info = {
+          seqProfile: 0,
+          seqLevelIdx0: 4,
+          seqTier0: 0,
+          highBitdepth: 0,
+          twelveBit: 0,
+          monochrome: 0,
+          chromaSubsamplingX: 1,
+          chromaSubsamplingY: 1,
+          chromaSamplePosition: 0,
+          bitDepth: 8
+        };
+        if (!payload || payload.length < 3) return info;
+
+        const br = new BitReader(payload);
+        info.seqProfile = br.readBits(3);
+        const stillPicture = br.readBits(1);
+        const reducedStill = br.readBits(1);
+        if (reducedStill) {
+          info.seqLevelIdx0 = br.readBits(5);
+          info.seqTier0 = 0;
+        } else {
+          const timingPresent = br.readBits(1);
+          let decoderModelPresent = 0;
+          if (timingPresent) {
+            br.skipBits(32); // num_units_in_display_tick
+            br.skipBits(32); // time_scale
+            const equalInterval = br.readBits(1);
+            if (equalInterval) br.readUvlc();
+            decoderModelPresent = br.readBits(1);
+            if (decoderModelPresent) {
+              br.skipBits(5); // buffer_delay_length_minus_1
+              br.skipBits(32); // num_units_in_decoding_tick
+              br.skipBits(10); // buffer_removal_time & frame_presentation_time lengths
+            }
+          }
+          const initialDisplayDelayPresent = br.readBits(1);
+          const opCntMinus1 = br.readBits(5);
+          for (let i = 0; i <= opCntMinus1; i++) {
+            br.skipBits(12); // operating_point_idc
+            const levelIdx = br.readBits(5);
+            const tier = levelIdx > 7 ? br.readBits(1) : 0;
+            if (i === 0) {
+              info.seqLevelIdx0 = levelIdx;
+              info.seqTier0 = tier;
+            }
+            if (decoderModelPresent) {
+              const present = br.readBits(1);
+              if (present) {
+                // Skip remaining parsing; we already have op 0 profile/tier/level
+                break;
+              }
+            }
+            if (initialDisplayDelayPresent) {
+              const present = br.readBits(1);
+              if (present) br.skipBits(4);
+            }
+          }
+        }
+        void stillPicture;
+        return info;
+      }
+
+      function av1CodecString(seqObu) {
+        const info = parseAv1SeqHeader(seqObu);
+        const levelStr = String(info.seqLevelIdx0).padStart(2, "0");
+        const tierChar = info.seqTier0 ? "H" : "M";
+        const depthStr = String(info.bitDepth).padStart(2, "0");
+        return `av01.${info.seqProfile}.${levelStr}${tierChar}.${depthStr}`;
+      }
+
+      /** Builds ISO BMFF av1C configuration record (4-byte header + Sequence Header OBU). */
+      function buildAv1cRecord(seqHeaderRaw) {
+        const info = parseAv1SeqHeader(seqHeaderRaw);
+        const raw = seqHeaderRaw instanceof Uint8Array ? seqHeaderRaw : new Uint8Array(0);
+        const out = new Uint8Array(4 + raw.length);
+        out[0] = 0x81; // marker=1, version=1
+        out[1] = ((info.seqProfile & 0x07) << 5) | (info.seqLevelIdx0 & 0x1f);
+        out[2] = ((info.seqTier0 & 0x01) << 7) |
+          ((info.highBitdepth & 0x01) << 6) |
+          ((info.twelveBit & 0x01) << 5) |
+          ((info.monochrome & 0x01) << 4) |
+          ((info.chromaSubsamplingX & 0x01) << 3) |
+          ((info.chromaSubsamplingY & 0x01) << 2) |
+          (info.chromaSamplePosition & 0x03);
+        out[3] = 0x00;
+        if (raw.length > 0) out.set(raw, 4);
+        return out;
+      }
+
+      /** Minimal ISO BMFF / fMP4 box writer used for MSE live playback over plain HTTP. */
+      function mp4Box(type, ...parts) {
+        let size = 8;
+        for (const part of parts) size += part.length;
+        const buf = new Uint8Array(size);
+        const view = new DataView(buf.buffer);
+        view.setUint32(0, size, false);
+        buf[4] = type.charCodeAt(0);
+        buf[5] = type.charCodeAt(1);
+        buf[6] = type.charCodeAt(2);
+        buf[7] = type.charCodeAt(3);
+        let offset = 8;
+        for (const part of parts) {
+          buf.set(part, offset);
+          offset += part.length;
+        }
+        return buf;
+      }
+
+      function mp4FullBox(type, version, flags, ...parts) {
+        const hdr = new Uint8Array(4);
+        hdr[0] = version & 0xff;
+        hdr[1] = (flags >>> 16) & 0xff;
+        hdr[2] = (flags >>> 8) & 0xff;
+        hdr[3] = flags & 0xff;
+        return mp4Box(type, hdr, ...parts);
+      }
+
+      function u32be(v) {
+        const b = new Uint8Array(4);
+        new DataView(b.buffer).setUint32(0, v >>> 0, false);
+        return b;
+      }
+
+      function strBytes(s) {
+        const b = new Uint8Array(s.length);
+        for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+        return b;
+      }
+
+      function buildFmp4InitWithSampleEntry(width, height, compatibleBrands, sampleEntryBox) {
+        const ftyp = mp4Box(
+          "ftyp",
+          strBytes("isom"),
+          u32be(512),
+          strBytes(compatibleBrands)
+        );
+
+        const matrix = new Uint8Array([
+          0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0x00, 0x01, 0x00, 0x00, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0x40, 0x00, 0x00, 0x00
+        ]);
+
+        const mvhdPayload = new Uint8Array(96);
+        const mv = new DataView(mvhdPayload.buffer);
+        mv.setUint32(8, 90000, false); // timescale
+        mv.setUint32(12, 0, false);
+        mv.setUint32(16, 0x00010000, false); // rate 1.0
+        mv.setUint16(20, 0x0100, false); // volume 1.0
+        mvhdPayload.set(matrix, 32);
+        mv.setUint32(92, 2, false); // next_track_ID
+        const mvhd = mp4FullBox("mvhd", 0, 0, mvhdPayload);
+
+        const tkhdPayload = new Uint8Array(80);
+        const tv = new DataView(tkhdPayload.buffer);
+        tv.setUint32(8, 1, false); // track_ID
+        tkhdPayload.set(matrix, 36);
+        tv.setUint32(72, (width & 0xffff) << 16, false);
+        tv.setUint32(76, (height & 0xffff) << 16, false);
+        const tkhd = mp4FullBox("tkhd", 0, 3, tkhdPayload);
+
+        const mdhdPayload = new Uint8Array(20);
+        const mdv = new DataView(mdhdPayload.buffer);
+        mdv.setUint32(8, 90000, false);
+        mdv.setUint32(12, 0, false);
+        mdv.setUint16(16, 0x55c4, false); // und
+        const mdhd = mp4FullBox("mdhd", 0, 0, mdhdPayload);
+
+        const hdlr = mp4FullBox(
+          "hdlr",
+          0,
+          0,
+          new Uint8Array(4),
+          strBytes("vide"),
+          new Uint8Array(12),
+          strBytes("AndroidWebCamera\0")
+        );
+
+        const vmhd = mp4FullBox("vmhd", 0, 1, new Uint8Array(8));
+        const urlBox = mp4FullBox("url ", 0, 1);
+        const dref = mp4FullBox("dref", 0, 0, u32be(1), urlBox);
+        const dinf = mp4Box("dinf", dref);
+
+        const stsd = mp4FullBox("stsd", 0, 0, u32be(1), sampleEntryBox);
+        const stts = mp4FullBox("stts", 0, 0, u32be(0));
+        const stsc = mp4FullBox("stsc", 0, 0, u32be(0));
+        const stsz = mp4FullBox("stsz", 0, 0, u32be(0), u32be(0));
+        const stco = mp4FullBox("stco", 0, 0, u32be(0));
+        const stbl = mp4Box("stbl", stsd, stts, stsc, stsz, stco);
+        const minf = mp4Box("minf", vmhd, dinf, stbl);
+        const mdia = mp4Box("mdia", mdhd, hdlr, minf);
+        const trak = mp4Box("trak", tkhd, mdia);
+
+        const trex = mp4FullBox(
+          "trex",
+          0,
+          0,
+          u32be(1),
+          u32be(1),
+          u32be(3000),
+          u32be(0),
+          u32be(0)
+        );
+        const mvex = mp4Box("mvex", trex);
+        const moov = mp4Box("moov", mvhd, trak, mvex);
+
+        const result = new Uint8Array(ftyp.length + moov.length);
+        result.set(ftyp, 0);
+        result.set(moov, ftyp.length);
+        return result;
+      }
+
+      function buildVisualSampleEntryHeader(width, height) {
+        const hdr = new Uint8Array(78);
+        const v = new DataView(hdr.buffer);
+        v.setUint16(6, 1, false); // data_reference_index
+        v.setUint16(24, width, false);
+        v.setUint16(26, height, false);
+        v.setUint32(28, 0x00480000, false); // 72 dpi
+        v.setUint32(32, 0x00480000, false);
+        v.setUint16(40, 1, false); // frame_count
+        v.setUint16(74, 24, false); // depth
+        v.setInt16(76, -1, false); // pre_defined
+        return hdr;
+      }
+
+      function buildFmp4InitSegment(width, height, sps, pps) {
+        const avcC = mp4Box("avcC", buildAvccRecord(sps, pps));
+        const avc1 = mp4Box("avc1", buildVisualSampleEntryHeader(width, height), avcC);
+        return buildFmp4InitWithSampleEntry(width, height, "isomiso6avc1mp41", avc1);
+      }
+
+      function buildFmp4InitSegmentHevc(width, height, vps, sps, pps) {
+        const hvcC = mp4Box("hvcC", buildHvccRecord(vps, sps, pps));
+        const hvc1 = mp4Box("hvc1", buildVisualSampleEntryHeader(width, height), hvcC);
+        return buildFmp4InitWithSampleEntry(width, height, "isomiso6hvc1mp41", hvc1);
+      }
+
+      function buildFmp4InitSegmentAv1(width, height, seqHeaderRaw) {
+        const av1C = mp4Box("av1C", buildAv1cRecord(seqHeaderRaw));
+        const av01 = mp4Box("av01", buildVisualSampleEntryHeader(width, height), av1C);
+        return buildFmp4InitWithSampleEntry(width, height, "isomiso6av01mp41", av01);
+      }
+
+      function buildFmp4MediaSegment(seqNum, baseDts90k, duration90k, isKeyFrame, samplePayload) {
+        const mfhd = mp4FullBox("mfhd", 0, 0, u32be(seqNum));
+        const tfhd = mp4FullBox("tfhd", 0, 0x020000, u32be(1));
+
+        const tfdtBody = new Uint8Array(8);
+        new DataView(tfdtBody.buffer).setBigUint64(0, BigInt(Math.max(0, baseDts90k)), false);
+        const tfdt = mp4FullBox("tfdt", 1, 0, tfdtBody);
+
+        const sampleFlags = isKeyFrame ? 0x02000000 : 0x01010000;
+        const trunHeaderOnly = new Uint8Array(20);
+        // flags: data_offset(0x1) | sample_duration(0x100) | sample_size(0x200) | sample_flags(0x400) = 0x701
+        const trunStub = mp4FullBox("trun", 0, 0x000701, trunHeaderOnly);
+        const trafStub = mp4Box("traf", tfhd, tfdt, trunStub);
+        const moofSize = 8 + mfhd.length + trafStub.length;
+        const dataOffset = moofSize + 8;
+
+        const trunView = new DataView(trunHeaderOnly.buffer);
+        trunView.setUint32(0, 1, false); // sample_count
+        trunView.setInt32(4, dataOffset, false);
+        trunView.setUint32(8, Math.max(1, duration90k >>> 0), false);
+        trunView.setUint32(12, samplePayload.length >>> 0, false);
+        trunView.setUint32(16, sampleFlags >>> 0, false);
+
+        const trun = mp4FullBox("trun", 0, 0x000701, trunHeaderOnly);
+        const traf = mp4Box("traf", tfhd, tfdt, trun);
+        const moof = mp4Box("moof", mfhd, traf);
+        const mdat = mp4Box("mdat", samplePayload);
+
+        const out = new Uint8Array(moof.length + mdat.length);
+        out.set(moof, 0);
+        out.set(mdat, moof.length);
+        return out;
+      }
+
+      // Expose testable primitives when loaded in Node.js unit/E2E verification
+      if (typeof module !== "undefined" && module.exports) {
+        module.exports = {
+          removeEmulationPreventionBytes,
+          parseAnnexBNals,
+          nalsToAvcc,
+          buildAvccRecord,
+          avcCodecString,
+          parseHevcSps,
+          hevcCodecString,
+          buildHvccRecord,
+          parseAv1Obus,
+          stripAv1TemporalDelimiter,
+          parseAv1SeqHeader,
+          av1CodecString,
+          buildAv1cRecord,
+          buildFmp4InitSegment,
+          buildFmp4InitSegmentHevc,
+          buildFmp4InitSegmentAv1,
+          buildFmp4MediaSegment
+        };
+        return;
+      }
+
+      // =========================================================================
+      // Browser Live Player (WebCodecs + MSE fMP4 + MJPEG)
+      // =========================================================================
+
+      const dom = {
+        liveDot: document.getElementById("liveDot"),
+        statusBadge: document.getElementById("statusBadge"),
+        decoderBadge: document.getElementById("decoderBadge"),
+        clientsBadge: document.getElementById("clientsBadge"),
+        streamInfoText: document.getElementById("streamInfoText"),
+        viewport: document.getElementById("viewport"),
+        wcCanvas: document.getElementById("wcCanvas"),
+        mseVideo: document.getElementById("mseVideo"),
+        mjpegImg: document.getElementById("mjpegImg"),
+        overlayMsg: document.getElementById("overlayMsg"),
+        overlayTitle: document.getElementById("overlayTitle"),
+        overlaySub: document.getElementById("overlaySub"),
+        errorBanner: document.getElementById("errorBanner"),
+        errorText: document.getElementById("errorText"),
+        fallbackH264Btn: document.getElementById("fallbackH264Btn"),
+        fallbackMjpegBtn: document.getElementById("fallbackMjpegBtn"),
+        cameraSelect: document.getElementById("cameraSelect"),
+        resolutionSelect: document.getElementById("resolutionSelect"),
+        fpsSelect: document.getElementById("fpsSelect"),
+        mirrorBtn: document.getElementById("mirrorBtn"),
+        torchBtn: document.getElementById("torchBtn"),
+        reconnectBtn: document.getElementById("reconnectBtn"),
+        fullscreenBtn: document.getElementById("fullscreenBtn"),
+        urlsContainer: document.getElementById("urlsContainer")
+      };
+
+      const CODEC_ID_MAP = { 1: "h264", 2: "h265", 3: "av1" };
+
+      const state = {
+        status: null,
+        activeMode: null, // "mjpeg" | "webcodecs" | "mse"
+        activeCodec: null,
+        playerSessionId: 0,
+        configEpoch: 0,
+        reconnectTimer: null,
+        ws: null,
+        decoder: null,
+        decoderConfiguring: false,
+        mse: null,
+        mseObjectUrl: null,
+        mseQueue: [], // array of { data: Uint8Array, isInit: boolean, isKey: boolean }
+        mseEvicting: false,
+        // Codec parameter sets
+        vps: null,
+        sps: null,
+        pps: null,
+        av1SeqHeader: null,
+        waitingForKeyFrame: true,
+        seqNum: 1,
+        basePtsUs: null,
+        cumulativeDts: 0,
+        lastPtsUs: null
+      };
+
+      function showError(msg) {
+        dom.errorText.textContent = msg;
+        dom.errorBanner.classList.add("visible");
+      }
+
+      function clearError() {
+        dom.errorBanner.classList.remove("visible");
+      }
+
+      function setOverlay(visible, title, sub) {
+        dom.overlayMsg.classList.toggle("hidden", !visible);
+        if (title) dom.overlayTitle.textContent = title;
+        if (sub) dom.overlaySub.textContent = sub;
+      }
+
+      function scheduleReconnect(delayMs) {
+        if (state.reconnectTimer) {
+          clearTimeout(state.reconnectTimer);
+          state.reconnectTimer = null;
+        }
+        const sessionAtSchedule = state.playerSessionId;
+        state.reconnectTimer = setTimeout(() => {
+          state.reconnectTimer = null;
+          if (state.playerSessionId !== sessionAtSchedule) return;
+          if (state.status && state.status.streaming && state.activeMode === null) {
+            startPlayerForStatus(state.status);
+          }
+        }, delayMs);
+      }
+
+      function applyTransform() {
+        const s = state.status;
+        if (!s) return;
+        const rot = s.rotation || 0;
+        const mirrorScale = s.mirrored ? "scaleX(-1)" : "";
+        let extraScale = "";
+        if ((rot === 90 || rot === 270) && dom.viewport.clientWidth > 0 && dom.viewport.clientHeight > 0) {
+          const factor = Math.min(
+            dom.viewport.clientHeight / dom.viewport.clientWidth,
+            dom.viewport.clientWidth / dom.viewport.clientHeight
+          );
+          extraScale = "scale(" + factor.toFixed(4) + ")";
+        }
+        const transform = `rotate(${rot}deg) ${mirrorScale} ${extraScale}`.trim();
+        dom.wcCanvas.style.transform = transform;
+        dom.mseVideo.style.transform = transform;
+        dom.mjpegImg.style.transform = transform;
+      }
+
+      function teardownPlayer() {
+        state.playerSessionId++;
+        if (state.reconnectTimer) {
+          clearTimeout(state.reconnectTimer);
+          state.reconnectTimer = null;
+        }
+        if (state.ws) {
+          try { state.ws.close(); } catch (_) {}
+          state.ws = null;
+        }
+        if (state.decoder) {
+          try { state.decoder.close(); } catch (_) {}
+          state.decoder = null;
+        }
+        state.decoderConfiguring = false;
+        if (state.mse) {
+          try {
+            if (state.mse.mediaSource.readyState === "open") {
+              state.mse.mediaSource.endOfStream();
+            }
+          } catch (_) {}
+          state.mse = null;
+        }
+        if (state.mseObjectUrl) {
+          try { URL.revokeObjectURL(state.mseObjectUrl); } catch (_) {}
+          state.mseObjectUrl = null;
+        }
+        state.mseQueue = [];
+        state.mseEvicting = false;
+        state.vps = null;
+        state.sps = null;
+        state.pps = null;
+        state.av1SeqHeader = null;
+        state.waitingForKeyFrame = true;
+        state.seqNum = 1;
+        state.basePtsUs = null;
+        state.cumulativeDts = 0;
+        state.lastPtsUs = null;
+
+        dom.mjpegImg.onload = null;
+        dom.mjpegImg.onerror = null;
+        dom.mjpegImg.removeAttribute("src");
+        dom.mseVideo.removeAttribute("src");
+        dom.mseVideo.load();
+        dom.wcCanvas.classList.remove("active");
+        dom.mseVideo.classList.remove("active");
+        dom.mjpegImg.classList.remove("active");
+        state.activeMode = null;
+        state.activeCodec = null;
+      }
+
+      function startPlayerForStatus(s) {
+        if (s.codec === "mjpeg") {
+          startMjpegPlayer();
+        } else {
+          startVideoPlayer(s.codec || "h264", /* forceMse */ false);
+        }
+      }
+
+      function startMjpegPlayer() {
+        teardownPlayer();
+        clearError();
+        const mySession = state.playerSessionId;
+        state.activeMode = "mjpeg";
+        state.activeCodec = "mjpeg";
+        dom.decoderBadge.textContent = "Декодер: MJPEG";
+        dom.mjpegImg.classList.add("active");
+        setOverlay(true, "Подключение MJPEG...", "Ожидание первого кадра");
+
+        dom.mjpegImg.onload = () => {
+          if (state.playerSessionId !== mySession) return;
+          setOverlay(false);
+        };
+        dom.mjpegImg.onerror = () => {
+          if (state.playerSessionId !== mySession) return;
+          state.activeMode = null;
+          setOverlay(true, "Переподключение MJPEG...", "Поток перезапускается");
+          scheduleReconnect(600);
+        };
+        dom.mjpegImg.src = "/stream.mjpg?t=" + Date.now();
+        applyTransform();
+      }
+
+      function startVideoPlayer(codecName, forceMse) {
+        teardownPlayer();
+        clearError();
+        const mySession = state.playerSessionId;
+        const canWebCodecs = !forceMse && typeof window.VideoDecoder === "function";
+        const canMse = typeof window.MediaSource === "function";
+
+        if (!canWebCodecs && !canMse) {
+          showError("Браузер не поддерживает WebCodecs или MediaSource. Переключите поток на MJPEG.");
+          return;
+        }
+
+        state.activeCodec = codecName;
+        state.activeMode = canWebCodecs ? "webcodecs" : "mse";
+        dom.decoderBadge.textContent = canWebCodecs
+          ? `Декодер: WebCodecs (${codecName.toUpperCase()})`
+          : `Декодер: MSE fMP4 (${codecName.toUpperCase()})`;
+
+        if (canWebCodecs) {
+          dom.wcCanvas.classList.add("active");
+          initWebCodecsDecoder(mySession, codecName);
+        } else {
+          dom.mseVideo.classList.add("active");
+          initMsePlayer(mySession, codecName);
+        }
+
+        applyTransform();
+        connectVideoWebSocket(mySession, codecName, canWebCodecs);
+      }
+
+      function initWebCodecsDecoder(mySession, codecName) {
+        const ctx = dom.wcCanvas.getContext("2d");
+        state.decoder = new VideoDecoder({
+          output(frame) {
+            if (state.playerSessionId !== mySession) {
+              frame.close();
+              return;
+            }
+            if (dom.wcCanvas.width !== frame.displayWidth || dom.wcCanvas.height !== frame.displayHeight) {
+              dom.wcCanvas.width = frame.displayWidth;
+              dom.wcCanvas.height = frame.displayHeight;
+            }
+            ctx.drawImage(frame, 0, 0);
+            frame.close();
+            setOverlay(false);
+          },
+          error(err) {
+            if (state.playerSessionId !== mySession) return;
+            // Fallback from WebCodecs to MSE automatically if available
+            if (typeof window.MediaSource === "function") {
+              startVideoPlayer(codecName, /* forceMse */ true);
+              return;
+            }
+            showError(`Ошибка WebCodecs (${codecName.toUpperCase()}): ${err.message || err}`);
+          }
+        });
+      }
+
+      function buildWebCodecsConfig(codecName) {
+        if (codecName === "h264") {
+          if (!state.sps || !state.pps) return null;
+          return {
+            codec: avcCodecString(state.sps),
+            description: buildAvccRecord(state.sps, state.pps),
+            optimizeForLatency: true
+          };
+        }
+        if (codecName === "h265") {
+          if (!state.vps || !state.sps || !state.pps) return null;
+          return {
+            codec: hevcCodecString(state.sps, "hvc1"),
+            description: buildHvccRecord(state.vps, state.sps, state.pps),
+            optimizeForLatency: true
+          };
+        }
+        if (codecName === "av1") {
+          if (!state.av1SeqHeader) return null;
+          return {
+            codec: av1CodecString(state.av1SeqHeader),
+            optimizeForLatency: true
+          };
+        }
+        return null;
+      }
+
+      async function ensureWebCodecsConfigured(mySession, codecName) {
+        const dec = state.decoder;
+        if (!dec || dec.state !== "unconfigured" || state.decoderConfiguring) return;
+        const cfg = buildWebCodecsConfig(codecName);
+        if (!cfg) return;
+
+        state.decoderConfiguring = true;
+        try {
+          if (typeof VideoDecoder.isConfigSupported === "function") {
+            const support = await VideoDecoder.isConfigSupported(cfg);
+            if (state.playerSessionId !== mySession) return;
+            if (!support || !support.supported) {
+              if (typeof window.MediaSource === "function") {
+                startVideoPlayer(codecName, /* forceMse */ true);
+              } else {
+                showError(
+                  `Браузер не поддерживает декодирование ${codecName.toUpperCase()} (${cfg.codec}). ` +
+                  "Поток доступен в OBS / VLC / FFmpeg / awc-bridge, либо переключитесь на H.264 / MJPEG."
+                );
+              }
+              return;
+            }
+          }
+          if (state.playerSessionId !== mySession || !state.decoder || state.decoder.state !== "unconfigured") {
+            return;
+          }
+          state.decoder.configure(cfg);
+        } catch (err) {
+          if (state.playerSessionId !== mySession) return;
+          if (typeof window.MediaSource === "function") {
+            startVideoPlayer(codecName, /* forceMse */ true);
+          } else {
+            showError(`Не удалось настроить WebCodecs (${codecName.toUpperCase()}): ${err.message || err}`);
+          }
+        } finally {
+          state.decoderConfiguring = false;
+        }
+      }
+
+      function initMsePlayer(mySession, codecName) {
+        const ms = new MediaSource();
+        const mseState = {
+          mediaSource: ms,
+          sourceBuffer: null,
+          initAppended: false,
+          mimeCodec: null,
+          codecName
+        };
+        state.mse = mseState;
+        const url = URL.createObjectURL(ms);
+        state.mseObjectUrl = url;
+        dom.mseVideo.src = url;
+        ms.addEventListener("sourceopen", () => {
+          if (state.playerSessionId !== mySession) return;
+          maybeInitMseSourceBuffer(mySession, codecName);
+          flushMseQueue();
+        });
+      }
+
+      function buildMseInitInfo(codecName, width, height) {
+        if (codecName === "h264") {
+          if (!state.sps || !state.pps) return null;
+          const codec = avcCodecString(state.sps);
+          return {
+            mime: `video/mp4; codecs="${codec}"`,
+            codec,
+            initSeg: buildFmp4InitSegment(width, height, state.sps, state.pps)
+          };
+        }
+        if (codecName === "h265") {
+          if (!state.vps || !state.sps || !state.pps) return null;
+          const hvc1 = hevcCodecString(state.sps, "hvc1");
+          const hev1 = hevcCodecString(state.sps, "hev1");
+          const preferred = MediaSource.isTypeSupported(`video/mp4; codecs="${hvc1}"`) ? hvc1 : hev1;
+          return {
+            mime: `video/mp4; codecs="${preferred}"`,
+            codec: preferred,
+            initSeg: buildFmp4InitSegmentHevc(width, height, state.vps, state.sps, state.pps)
+          };
+        }
+        if (codecName === "av1") {
+          if (!state.av1SeqHeader) return null;
+          const codec = av1CodecString(state.av1SeqHeader);
+          return {
+            mime: `video/mp4; codecs="${codec}"`,
+            codec,
+            initSeg: buildFmp4InitSegmentAv1(width, height, state.av1SeqHeader)
+          };
+        }
+        return null;
+      }
+
+      function maybeInitMseSourceBuffer(mySession, codecName) {
+        const mseState = state.mse;
+        if (!mseState || mseState.sourceBuffer) return;
+        if (mseState.mediaSource.readyState !== "open") return;
+
+        const w = state.status ? state.status.width : 1280;
+        const h = state.status ? state.status.height : 720;
+        const initInfo = buildMseInitInfo(codecName, w, h);
+        if (!initInfo) return;
+
+        if (!MediaSource.isTypeSupported(initInfo.mime)) {
+          showError(
+            `Этот браузер не поддерживает воспроизведение ${codecName.toUpperCase()} (${initInfo.codec}). ` +
+            "Поток работает в OBS / VLC / FFmpeg / awc-bridge, либо выберите H.264 / MJPEG для просмотра в браузере."
+          );
+          return;
+        }
+        try {
+          const sb = mseState.mediaSource.addSourceBuffer(initInfo.mime);
+          sb.mode = "segments";
+          sb.addEventListener("updateend", () => {
+            if (state.playerSessionId !== mySession) return;
+            state.mseEvicting = false;
+            const v = dom.mseVideo;
+            if (v.buffered.length > 0) {
+              const start = v.buffered.start(0);
+              const end = v.buffered.end(v.buffered.length - 1);
+              if (end - v.currentTime > 0.35) {
+                v.currentTime = end - 0.05;
+              }
+              if (v.paused) {
+                v.play().catch(() => {});
+              }
+              setOverlay(false);
+              // Evict old buffered media to prevent QuotaExceededError during long streams
+              if (!sb.updating && v.currentTime - start > 6.0) {
+                try {
+                  state.mseEvicting = true;
+                  sb.remove(start, Math.max(start, v.currentTime - 2.0));
+                  return;
+                } catch (_) {
+                  state.mseEvicting = false;
+                }
+              }
+            }
+            flushMseQueue();
+          });
+          mseState.sourceBuffer = sb;
+          mseState.mimeCodec = initInfo.codec;
+          state.mseQueue.unshift({ data: initInfo.initSeg, isInit: true, isKey: true });
+          mseState.initAppended = true;
+        } catch (err) {
+          showError("Ошибка MSE: " + (err.message || err));
+        }
+      }
+
+      function trimMseQueueSafely() {
+        if (state.mseQueue.length <= 18) return;
+        const hasLeadingInit = state.mseQueue[0] && state.mseQueue[0].isInit;
+        const searchStart = hasLeadingInit ? 1 : 0;
+        let lastKeyIdx = -1;
+        for (let i = state.mseQueue.length - 1; i >= searchStart; i--) {
+          if (state.mseQueue[i].isKey) {
+            lastKeyIdx = i;
+            break;
+          }
+        }
+        if (lastKeyIdx > searchStart) {
+          state.mseQueue.splice(searchStart, lastKeyIdx - searchStart);
+        }
+      }
+
+      function flushMseQueue() {
+        const mseState = state.mse;
+        if (!mseState || !mseState.sourceBuffer || mseState.sourceBuffer.updating || state.mseEvicting) return;
+        if (state.mseQueue.length === 0) return;
+        trimMseQueueSafely();
+        const item = state.mseQueue.shift();
+        try {
+          mseState.sourceBuffer.appendBuffer(item.data);
+        } catch (err) {
+          if (err && err.name === "QuotaExceededError") {
+            const v = dom.mseVideo;
+            if (v.buffered.length > 0 && !mseState.sourceBuffer.updating) {
+              try {
+                state.mseEvicting = true;
+                mseState.sourceBuffer.remove(v.buffered.start(0), Math.max(v.buffered.start(0), v.currentTime - 0.5));
+                return;
+              } catch (_) {
+                state.mseEvicting = false;
+              }
+            }
+          }
+          state.mseQueue.length = 0;
+          state.waitingForKeyFrame = true;
+        }
+      }
+
+      function connectVideoWebSocket(mySession, expectedCodec, useWebCodecs) {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const ws = new WebSocket(`${proto}//${location.host}/ws/video`);
+        ws.binaryType = "arraybuffer";
+        state.ws = ws;
+
+        ws.onopen = () => {
+          if (state.playerSessionId !== mySession) return;
+          setOverlay(true, "Ожидание ключевого кадра...", `Поток ${expectedCodec.toUpperCase()} подключается`);
+        };
+
+        ws.onmessage = (ev) => {
+          if (state.playerSessionId !== mySession) return;
+          if (!(ev.data instanceof ArrayBuffer) || ev.data.byteLength <= 10) return;
+
+          const view = new DataView(ev.data);
+          const codecId = view.getUint8(0);
+          const packetCodec = CODEC_ID_MAP[codecId] || expectedCodec;
+          if (packetCodec !== expectedCodec) return;
+
+          const type = view.getUint8(1);
+          const ptsUs = Number(view.getBigInt64(2, false));
+          const payload = new Uint8Array(ev.data, 10);
+
+          let samplePayload = null;
+          let isKey = type === 2;
+
+          if (packetCodec === "h264") {
+            const nals = parseAnnexBNals(payload);
+            if (nals.length === 0) return;
+            const frameNals = [];
+            for (const nal of nals) {
+              const nalType = nal[0] & 0x1f;
+              if (nalType === 7) state.sps = nal.slice();
+              else if (nalType === 8) state.pps = nal.slice();
+              else if (nalType !== 9) frameNals.push(nal);
+            }
+            if (type === 1) {
+              if (useWebCodecs) ensureWebCodecsConfigured(mySession, packetCodec);
+              else {
+                maybeInitMseSourceBuffer(mySession, packetCodec);
+                flushMseQueue();
+              }
+              return;
+            }
+            if (frameNals.length === 0) return;
+            isKey = isKey || frameNals.some((n) => (n[0] & 0x1f) === 5);
+            if (state.waitingForKeyFrame) {
+              if (!isKey || !state.sps || !state.pps) return;
+              state.waitingForKeyFrame = false;
+            }
+            samplePayload = nalsToAvcc(frameNals);
+          } else if (packetCodec === "h265") {
+            const nals = parseAnnexBNals(payload);
+            if (nals.length === 0) return;
+            const frameNals = [];
+            for (const nal of nals) {
+              const nalType = (nal[0] >>> 1) & 0x3f;
+              if (nalType === 32) state.vps = nal.slice();
+              else if (nalType === 33) state.sps = nal.slice();
+              else if (nalType === 34) state.pps = nal.slice();
+              else if (nalType !== 35) frameNals.push(nal);
+            }
+            if (type === 1) {
+              if (useWebCodecs) ensureWebCodecsConfigured(mySession, packetCodec);
+              else {
+                maybeInitMseSourceBuffer(mySession, packetCodec);
+                flushMseQueue();
+              }
+              return;
+            }
+            if (frameNals.length === 0) return;
+            isKey = isKey || frameNals.some((n) => {
+              const t = (n[0] >>> 1) & 0x3f;
+              return t === 19 || t === 20 || t === 21;
+            });
+            if (state.waitingForKeyFrame) {
+              if (!isKey || !state.vps || !state.sps || !state.pps) return;
+              state.waitingForKeyFrame = false;
+            }
+            samplePayload = nalsToAvcc(frameNals);
+          } else if (packetCodec === "av1") {
+            const obus = parseAv1Obus(payload);
+            const seq = obus.find((o) => o.type === 1);
+            if (seq) state.av1SeqHeader = seq.raw.slice();
+            if (type === 1) {
+              if (useWebCodecs) ensureWebCodecsConfigured(mySession, packetCodec);
+              else {
+                maybeInitMseSourceBuffer(mySession, packetCodec);
+                flushMseQueue();
+              }
+              return;
+            }
+            isKey = isKey || !!seq;
+            if (state.waitingForKeyFrame) {
+              if (!isKey || !state.av1SeqHeader) return;
+              state.waitingForKeyFrame = false;
+            }
+            samplePayload = useWebCodecs ? payload : stripAv1TemporalDelimiter(payload);
+          } else {
+            return;
+          }
+
+          if (useWebCodecs) {
+            const dec = state.decoder;
+            if (!dec) return;
+            if (dec.state === "unconfigured") {
+              ensureWebCodecsConfigured(mySession, packetCodec);
+              return;
+            }
+            if (dec.state === "configured") {
+              if (dec.decodeQueueSize > 4 && !isKey) {
+                // Dropping a delta frame requires waiting for the next keyframe to prevent corruption
+                state.waitingForKeyFrame = true;
+                return;
+              }
+              try {
+                dec.decode(new EncodedVideoChunk({
+                  type: isKey ? "key" : "delta",
+                  timestamp: ptsUs,
+                  data: samplePayload
+                }));
+              } catch (_) {
+                state.waitingForKeyFrame = true;
+              }
+            }
+          } else {
+            maybeInitMseSourceBuffer(mySession, packetCodec);
+            if (!state.mse || !state.mse.sourceBuffer) return;
+
+            if (state.basePtsUs === null) {
+              state.basePtsUs = ptsUs;
+              state.lastPtsUs = ptsUs;
+            }
+            const targetDur = Math.round(90000 / ((state.status && state.status.fps) || 30));
+            const rawDelta = state.lastPtsUs !== null ? Math.round(((ptsUs - state.lastPtsUs) * 90000) / 1e6) : targetDur;
+            const dur = rawDelta > 300 && rawDelta < 30000 ? rawDelta : targetDur;
+            state.lastPtsUs = ptsUs;
+
+            const seg = buildFmp4MediaSegment(state.seqNum++, state.cumulativeDts, dur, isKey, samplePayload);
+            state.cumulativeDts += dur;
+            state.mseQueue.push({ data: seg, isInit: false, isKey });
+            flushMseQueue();
+          }
+        };
+
+        ws.onclose = () => {
+          if (state.playerSessionId !== mySession) return;
+          if (state.ws === ws) {
+            state.ws = null;
+            state.activeMode = null;
+            setOverlay(true, "Соединение закрыто", "Переподключение...");
+            scheduleReconnect(450);
+          }
+        };
+      }
+
+      async function copyTextSafe(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          try {
+            await navigator.clipboard.writeText(text);
+            return true;
+          } catch (_) {}
+        }
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          const ok = document.execCommand("copy");
+          document.body.removeChild(ta);
+          return ok;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      async function postConfig(patch) {
+        const epoch = ++state.configEpoch;
+        try {
+          const resp = await fetch("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch)
+          });
+          const body = await resp.json().catch(() => null);
+          if (epoch !== state.configEpoch) return;
+          if (resp.ok && body) {
+            clearError();
+            applyStatus(body);
+          } else {
+            showError((body && body.error) || `Ошибка обновления параметров (HTTP ${resp.status})`);
+          }
+        } catch (err) {
+          showError("Не удалось обновить параметры: " + (err.message || err));
+        }
+      }
+
+      function streamPathForCodec(codec) {
+        switch (codec) {
+          case "h265": return "/stream.h265";
+          case "av1": return "/stream.av1";
+          case "mjpeg": return "/stream.mjpg";
+          default: return "/stream.h264";
+        }
+      }
+
+      function ffmpegInputFlagsForCodec(codec) {
+        switch (codec) {
+          case "h265": return "-fflags nobuffer -flags low_delay -f hevc";
+          case "av1": return "-flags low_delay -f ivf";
+          case "mjpeg": return "-fflags nobuffer -flags low_delay -f mpjpeg";
+          default: return "-fflags nobuffer -flags low_delay -f h264";
+        }
+      }
+
+      function renderUrls(s) {
+        const origin = location.origin;
+        const streamPath = s.streamPath || streamPathForCodec(s.codec);
+        const ffFlags = ffmpegInputFlagsForCodec(s.codec);
+        const items = [
+          { label: "Веб-интерфейс", value: origin + "/" },
+          { label: `Прямой поток (${(s.codec || "h264").toUpperCase()}) для OBS / VLC`, value: origin + streamPath },
+          { label: "MJPEG-поток", value: origin + "/stream.mjpg" },
+          { label: "FFmpeg (Linux виртуальная камера)", value: `ffmpeg ${ffFlags} -i ${origin}${streamPath} -pix_fmt yuyv422 -f v4l2 /dev/video0` }
+        ];
+        dom.urlsContainer.innerHTML = "";
+        for (const item of items) {
+          const row = document.createElement("div");
+          row.className = "url-item";
+
+          const infoDiv = document.createElement("div");
+          infoDiv.style.minWidth = "0";
+          infoDiv.style.flex = "1";
+
+          const labelEl = document.createElement("div");
+          labelEl.className = "url-label";
+          labelEl.textContent = item.label;
+
+          const valEl = document.createElement("div");
+          valEl.className = "url-text";
+          valEl.title = item.value;
+          valEl.textContent = item.value;
+
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "copy-btn";
+          btn.textContent = "Копировать";
+          btn.addEventListener("click", async () => {
+            const ok = await copyTextSafe(item.value);
+            btn.textContent = ok ? "Готово" : "Ошибка";
+            setTimeout(() => (btn.textContent = "Копировать"), 1200);
+          });
+
+          infoDiv.appendChild(labelEl);
+          infoDiv.appendChild(valEl);
+          row.appendChild(infoDiv);
+          row.appendChild(btn);
+          dom.urlsContainer.appendChild(row);
+        }
+      }
+
+      function syncCameraAndResolutionControls(s) {
+        if (Array.isArray(s.cameras)) {
+          const camIds = s.cameras.map((c) => c.id).join(",");
+          if (dom.cameraSelect.dataset.sig !== camIds) {
+            dom.cameraSelect.dataset.sig = camIds;
+            dom.cameraSelect.innerHTML = "";
+            for (const cam of s.cameras) {
+              const opt = document.createElement("option");
+              opt.value = cam.id;
+              opt.textContent = cam.name;
+              dom.cameraSelect.appendChild(opt);
+            }
+          }
+          dom.cameraSelect.value = s.cameraId || "0";
+
+          const activeCam = s.cameras.find((c) => c.id === s.cameraId) || s.cameras[0];
+          if (activeCam && Array.isArray(activeCam.resolutions)) {
+            const resSig = activeCam.id + ":" + activeCam.resolutions.map((r) => `${r.width}x${r.height}`).join(",");
+            if (dom.resolutionSelect.dataset.sig !== resSig) {
+              dom.resolutionSelect.dataset.sig = resSig;
+              dom.resolutionSelect.innerHTML = "";
+              for (const r of activeCam.resolutions) {
+                const opt = document.createElement("option");
+                opt.value = `${r.width}x${r.height}`;
+                opt.textContent = `${r.width}×${r.height}`;
+                dom.resolutionSelect.appendChild(opt);
+              }
+            }
+            dom.resolutionSelect.value = `${s.width}x${s.height}`;
+
+            const activeRes = activeCam.resolutions.find((r) => r.width === s.width && r.height === s.height) || activeCam.resolutions[0];
+            if (activeRes && Array.isArray(activeRes.fps)) {
+              const fpsSig = `${activeCam.id}:${activeRes.width}x${activeRes.height}:${activeRes.fps.join(",")}`;
+              if (dom.fpsSelect.dataset.sig !== fpsSig) {
+                dom.fpsSelect.dataset.sig = fpsSig;
+                dom.fpsSelect.innerHTML = "";
+                for (const fps of activeRes.fps) {
+                  const opt = document.createElement("option");
+                  opt.value = String(fps);
+                  opt.textContent = `${fps} fps`;
+                  dom.fpsSelect.appendChild(opt);
+                }
+              }
+              dom.fpsSelect.value = String(s.fps);
+            }
+          }
+        }
+      }
+
+      function applyStatus(s) {
+        const prev = state.status;
+        state.status = s;
+
+        dom.liveDot.classList.toggle("live", !!s.streaming);
+        dom.statusBadge.textContent = s.streaming
+          ? `В эфире • ${s.width}×${s.height} @ ${s.measuredFps || s.fps} fps`
+          : "Трансляция остановлена";
+        dom.clientsBadge.textContent = `Клиентов: ${s.clients || 0}`;
+        dom.streamInfoText.textContent = `${s.cameraName || "Камера"} • ${(s.codec || "h264").toUpperCase()} • ${s.width}×${s.height} • ${s.fps} fps`;
+
+        syncCameraAndResolutionControls(s);
+
+        const supportById = {};
+        if (Array.isArray(s.supportedCodecs)) {
+          for (const c of s.supportedCodecs) {
+            supportById[c.id] = c;
+          }
+        }
+        document.querySelectorAll("[data-codec]").forEach((btn) => {
+          const cid = btn.dataset.codec;
+          const info = supportById[cid];
+          const supported = info ? !!info.supported : (cid === "h264" || cid === "mjpeg");
+          btn.disabled = !supported;
+          btn.classList.toggle("selected", cid === s.codec);
+          btn.title = supported
+            ? (info && info.encoder ? `Энкодер: ${info.encoder}` : "")
+            : "Не поддерживается этим смартфоном";
+        });
+
+        document.querySelectorAll("[data-rot]").forEach((btn) => {
+          btn.classList.toggle("selected", Number(btn.dataset.rot) === Number(s.rotation || 0));
+        });
+
+        dom.mirrorBtn.classList.toggle("selected", !!s.mirrored);
+        dom.mirrorBtn.textContent = `Зеркало: ${s.mirrored ? "Вкл" : "Выкл"}`;
+        dom.torchBtn.disabled = !s.hasFlash;
+        dom.torchBtn.classList.toggle("selected", !!s.torchEnabled);
+        dom.torchBtn.textContent = `Фонарик: ${s.torchEnabled ? "Вкл" : "Выкл"}`;
+
+        applyTransform();
+        if (!prev || prev.codec !== s.codec) {
+          renderUrls(s);
+        }
+
+        if (!s.streaming) {
+          if (state.activeMode !== null) teardownPlayer();
+          setOverlay(true, "Трансляция на телефоне остановлена", "Нажмите «Начать трансляцию» в приложении AndroidWebCamera");
+          return;
+        }
+
+        const formatChanged = prev && (
+          prev.streaming !== s.streaming ||
+          prev.codec !== s.codec ||
+          prev.cameraId !== s.cameraId ||
+          prev.width !== s.width ||
+          prev.height !== s.height ||
+          prev.fps !== s.fps
+        );
+
+        if (state.activeMode === "mjpeg" && dom.mjpegImg.naturalWidth > 0) {
+          setOverlay(false);
+        }
+        if (state.activeMode === null || formatChanged) {
+          startPlayerForStatus(s);
+        }
+      }
+
+      async function pollStatus() {
+        const epochBefore = state.configEpoch;
+        try {
+          const resp = await fetch("/api/status", { cache: "no-store" });
+          if (resp.ok && epochBefore === state.configEpoch) {
+            applyStatus(await resp.json());
+          }
+        } catch (_) {
+          dom.statusBadge.textContent = "Нет связи с телефоном";
+          dom.liveDot.classList.remove("live");
+        }
+      }
+
+      dom.cameraSelect.addEventListener("change", (e) => {
+        postConfig({ cameraId: e.target.value });
+      });
+
+      dom.resolutionSelect.addEventListener("change", (e) => {
+        const parts = e.target.value.split("x").map(Number);
+        if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+          postConfig({ width: parts[0], height: parts[1] });
+        }
+      });
+
+      dom.fpsSelect.addEventListener("change", (e) => {
+        const fps = Number(e.target.value);
+        if (fps > 0) postConfig({ fps });
+      });
+
+      document.querySelectorAll("[data-codec]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if (!btn.disabled) postConfig({ codec: btn.dataset.codec });
+        });
+      });
+
+      document.querySelectorAll("[data-rot]").forEach((btn) => {
+        btn.addEventListener("click", () => postConfig({ rotation: Number(btn.dataset.rot) }));
+      });
+
+      dom.mirrorBtn.addEventListener("click", () => {
+        if (!state.status) return;
+        postConfig({ mirrored: !state.status.mirrored });
+      });
+
+      dom.torchBtn.addEventListener("click", () => {
+        if (!state.status) return;
+        postConfig({ torchEnabled: !state.status.torchEnabled });
+      });
+
+      dom.fallbackH264Btn.addEventListener("click", () => {
+        postConfig({ codec: "h264" });
+      });
+
+      dom.fallbackMjpegBtn.addEventListener("click", () => {
+        postConfig({ codec: "mjpeg" });
+      });
+
+      dom.reconnectBtn.addEventListener("click", () => {
+        teardownPlayer();
+        pollStatus();
+      });
+
+      dom.fullscreenBtn.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          dom.viewport.requestFullscreen?.().catch(() => {});
+        } else {
+          document.exitFullscreen?.().catch(() => {});
+        }
+      });
+
+      window.addEventListener("resize", applyTransform);
+      pollStatus();
+      setInterval(pollStatus, 2000);
+    })();
+  </script>
+</body>
+</html>

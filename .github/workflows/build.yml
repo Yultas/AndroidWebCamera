@@ -1,0 +1,157 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android Debug APK & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests, Lint & build Debug APK
+        working-directory: android
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AndroidWebCamera-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+  pc-bridge:
+    name: PC Bridge Tests & Cross-Compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache-dependency-path: pc-bridge/go.mod
+
+      - name: Install FFmpeg for E2E tests
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Vet & Test Go Bridge
+        working-directory: pc-bridge
+        run: |
+          go vet ./...
+          go test -v -race ./...
+
+      - name: Cross-compile Linux & Win64 binaries
+        working-directory: pc-bridge
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/awc-bridge-linux-amd64 ./cmd/awc-bridge
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/awc-bridge-windows-amd64.exe ./cmd/awc-bridge
+
+      - name: Upload PC Bridge artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: awc-bridge-binaries
+          path: pc-bridge/dist/*
+
+  obs-plugin-linux:
+    name: OBS Plugin (Linux x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies, FFmpeg & libobs-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config ffmpeg \
+            libavformat-dev libavcodec-dev libavutil-dev libswscale-dev libobs-dev
+
+      - name: Configure & Build OBS Plugin
+        run: |
+          cmake -S obs-plugin -B obs-plugin/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build obs-plugin/build
+
+      - name: Run OBS Plugin Unit & E2E Tests
+        run: ctest --test-dir obs-plugin/build --output-on-failure -V
+
+      - name: Package OBS Plugin for Linux
+        run: |
+          mkdir -p obs-plugin/pkg/obs-android-webcamera/bin/64bit
+          mkdir -p obs-plugin/pkg/obs-android-webcamera/data
+          cp obs-plugin/build/obs-android-webcamera.so obs-plugin/pkg/obs-android-webcamera/bin/64bit/
+          cp -r obs-plugin/data/* obs-plugin/pkg/obs-android-webcamera/data/
+          tar -C obs-plugin/pkg -czf obs-plugin/obs-android-webcamera-linux-x86_64.tar.gz obs-android-webcamera
+
+      - name: Upload Linux OBS Plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-android-webcamera-linux-x86_64
+          path: obs-plugin/obs-android-webcamera-linux-x86_64.tar.gz
+
+  obs-plugin-windows:
+    name: OBS Plugin (Windows x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FFmpeg CLI for E2E tests
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Download OBS Windows FFmpeg dependencies (obs-deps)
+        shell: pwsh
+        run: |
+          $headers = @{ "User-Agent" = "AndroidWebCamera-CI" }
+          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)" }
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/obsproject/obs-deps/releases/latest" -Headers $headers
+          $asset = $rel.assets | Where-Object { $_.name -match "^windows-deps-\d{4}-\d{2}-\d{2}-x64\.zip$" } | Select-Object -First 1
+          if (-not $asset) { throw "Could not find windows-deps x64 zip in obs-deps latest release" }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "C:\windows-deps.zip"
+          Expand-Archive -Path "C:\windows-deps.zip" -DestinationPath "C:\obs-deps" -Force
+          $hdr = Get-ChildItem -Path "C:\obs-deps" -Filter "avformat.h" -Recurse | Select-Object -First 1
+          if (-not $hdr) { throw "avformat.h not found inside windows-deps" }
+          $root = ($hdr.Directory.Parent.Parent.FullName -replace '\\','/')
+          "OBS_DEPS_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure & Build OBS Plugin (MSVC)
+        shell: pwsh
+        run: |
+          cmake -S obs-plugin -B obs-plugin/build -A x64 `
+            -DFFMPEG_ROOT="$env:OBS_DEPS_ROOT"
+          cmake --build obs-plugin/build --config Release
+
+      - name: Run OBS Plugin Unit & E2E Tests
+        shell: pwsh
+        run: |
+          Copy-Item "$env:OBS_DEPS_ROOT/bin/*.dll" -Destination "obs-plugin/build/Release/" -Force
+          ctest --test-dir obs-plugin/build -C Release --output-on-failure -V
+
+      - name: Package OBS Plugin for Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "obs-plugin/pkg/obs-android-webcamera/bin/64bit" | Out-Null
+          New-Item -ItemType Directory -Force -Path "obs-plugin/pkg/obs-android-webcamera/data" | Out-Null
+          Copy-Item "obs-plugin/build/Release/obs-android-webcamera.dll" "obs-plugin/pkg/obs-android-webcamera/bin/64bit/"
+          Copy-Item "obs-plugin/data/*" "obs-plugin/pkg/obs-android-webcamera/data/" -Recurse
+          Compress-Archive -Path "obs-plugin/pkg/obs-android-webcamera" -DestinationPath "obs-plugin/obs-android-webcamera-windows-x64.zip" -Force
+
+      - name: Upload Windows OBS Plugin artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-android-webcamera-windows-x64
+          path: obs-plugin/obs-android-webcamera-windows-x64.zip
