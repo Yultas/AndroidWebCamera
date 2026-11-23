@@ -19,6 +19,7 @@ obs-plugin/dist/
 
 # Windows Virtual Camera
 win-vcam/build*/
+win-vcam/dist/
 win-vcam/pkg/
 win-vcam/*.zip
 

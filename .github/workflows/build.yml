@@ -212,9 +212,41 @@ jobs:
           Copy-Item "win-vcam/build-x86/Release/awc-vcam-filter32.dll" $pkg
           Copy-Item "win-vcam/scripts/install-vcam.bat" $pkg
           Copy-Item "win-vcam/scripts/uninstall-vcam.bat" $pkg
-          Get-ChildItem "$env:OBS_DEPS_ROOT/bin/*.dll" | Where-Object {
-            $_.Name -match "^(avcodec|avformat|avutil|swscale|swresample|zlib)"
-          } | Copy-Item -Destination $pkg -Force
+
+          # Recursively copy all required DLL dependencies from obs-deps/bin using dumpbin
+          $dumpbin = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" -Filter "dumpbin.exe" -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "Hostx64\\x64\\dumpbin\.exe$" } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+
+          $depsDir = "$env:OBS_DEPS_ROOT/bin"
+          $queue = New-Object System.Collections.Generic.Queue[string]
+          $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+          $queue.Enqueue((Resolve-Path "$pkg/awc-vcam.exe").Path)
+          [void]$seen.Add("awc-vcam.exe")
+
+          while ($queue.Count -gt 0) {
+            $cur = $queue.Dequeue()
+            $out = & $dumpbin /nologo /dependents $cur
+            foreach ($line in $out) {
+              if ($line -match "^\s+([^\s]+\.dll)\s*$") {
+                $dll = $Matches[1]
+                if ($seen.Add($dll)) {
+                  $src = Join-Path $depsDir $dll
+                  if (Test-Path $src) {
+                    $dst = Join-Path $pkg $dll
+                    Copy-Item $src $dst -Force
+                    $queue.Enqueue((Resolve-Path $dst).Path)
+                  }
+                }
+              }
+            }
+          }
+
+          # Smoke-test packaged awc-vcam.exe from $pkg to ensure zero missing DLLs
+          & "$pkg/awc-vcam.exe" --help
+          if ($LASTEXITCODE -ne 0) { throw "Packaged awc-vcam.exe failed smoke test!" }
+
           Compress-Archive -Path $pkg -DestinationPath "win-vcam/android-webcamera-win-vcam-x64.zip" -Force
 
       - name: Upload Windows Virtual Camera artifact
