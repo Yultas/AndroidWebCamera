@@ -155,3 +155,70 @@ jobs:
         with:
           name: obs-android-webcamera-windows-x64
           path: obs-plugin/obs-android-webcamera-windows-x64.zip
+
+  win-vcam-windows:
+    name: Windows Virtual Camera (DirectShow x64/x86 + Host)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install FFmpeg CLI for E2E tests
+        run: choco install ffmpeg -y --no-progress
+
+      - name: Download FFmpeg Windows dependencies (obs-deps)
+        shell: pwsh
+        run: |
+          $headers = @{ "User-Agent" = "AndroidWebCamera-CI" }
+          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "Bearer $($env:GITHUB_TOKEN)" }
+          $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/obsproject/obs-deps/releases/latest" -Headers $headers
+          $asset = $rel.assets | Where-Object { $_.name -match "^windows-deps-\d{4}-\d{2}-\d{2}-x64\.zip$" } | Select-Object -First 1
+          if (-not $asset) { throw "Could not find windows-deps x64 zip in obs-deps latest release" }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "C:\windows-deps.zip"
+          Expand-Archive -Path "C:\windows-deps.zip" -DestinationPath "C:\obs-deps" -Force
+          $hdr = Get-ChildItem -Path "C:\obs-deps" -Filter "avformat.h" -Recurse | Select-Object -First 1
+          if (-not $hdr) { throw "avformat.h not found inside windows-deps" }
+          $root = ($hdr.Directory.Parent.Parent.FullName -replace '\\','/')
+          "OBS_DEPS_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure & Build x64 Filter + Host + Tests (MSVC)
+        shell: pwsh
+        run: |
+          cmake -S win-vcam -B win-vcam/build-x64 -A x64 `
+            -DFFMPEG_ROOT="$env:OBS_DEPS_ROOT"
+          cmake --build win-vcam/build-x64 --config Release
+
+      - name: Run win-vcam Unit & E2E Tests
+        shell: pwsh
+        run: |
+          Copy-Item "$env:OBS_DEPS_ROOT/bin/*.dll" -Destination "win-vcam/build-x64/Release/" -Force
+          ctest --test-dir win-vcam/build-x64 -C Release --output-on-failure -V
+
+      - name: Configure & Build x86 (Win32) DirectShow Filter DLL
+        shell: pwsh
+        run: |
+          cmake -S win-vcam -B win-vcam/build-x86 -A Win32 `
+            -DAWC_VCAM_FILTER_ONLY=ON
+          cmake --build win-vcam/build-x86 --config Release
+
+      - name: Package Windows Virtual Camera bundle
+        shell: pwsh
+        run: |
+          $pkg = "win-vcam/pkg/AndroidWebCamera-WinVCam"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          Copy-Item "win-vcam/build-x64/Release/awc-vcam.exe" $pkg
+          Copy-Item "win-vcam/build-x64/Release/awc-vcam-filter64.dll" $pkg
+          Copy-Item "win-vcam/build-x86/Release/awc-vcam-filter32.dll" $pkg
+          Copy-Item "win-vcam/scripts/install-vcam.bat" $pkg
+          Copy-Item "win-vcam/scripts/uninstall-vcam.bat" $pkg
+          Get-ChildItem "$env:OBS_DEPS_ROOT/bin/*.dll" | Where-Object {
+            $_.Name -match "^(avcodec|avformat|avutil|swscale|swresample|zlib)"
+          } | Copy-Item -Destination $pkg -Force
+          Compress-Archive -Path $pkg -DestinationPath "win-vcam/android-webcamera-win-vcam-x64.zip" -Force
+
+      - name: Upload Windows Virtual Camera artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-webcamera-win-vcam-x64
+          path: win-vcam/android-webcamera-win-vcam-x64.zip

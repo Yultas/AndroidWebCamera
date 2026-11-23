@@ -171,9 +171,22 @@ sudo modprobe v4l2loopback exclusive_caps=1 card_label="AndroidWebCamera"
 
 ### Подключение на Win64
 
-1. **Через браузер / Wi-Fi / Точку доступа**: откройте `http://<IP-телефона>:8080/`.
-2. **Через USB (`awc-bridge-windows-amd64.exe`)**:
+1. **Как системная виртуальная камера (`win-vcam/`) для VTube Studio / Discord / Zoom / OBS (без OBS Studio)**:
+   - Скачайте архив `android-webcamera-win-vcam-x64.zip` из GitHub Actions (или соберите `win-vcam/` через CMake + MSVC) и распакуйте в постоянную папку (например, `C:\AndroidWebCamera-WinVCam`).
+   - Один раз запустите **`install-vcam.bat` от имени администратора** — зарегистрируются DirectShow-фильтры `awc-vcam-filter64.dll` и `awc-vcam-filter32.dll` с именем камеры **`AndroidWebCamera`** (форматы `RGB24` и `YUY2`, режимы `1280x720@60/30`, `1920x1080@60/30`, `640x480@60/30`).
+   - Запустите автономный хост (внешний `ffmpeg.exe` не требуется):
+     ```powershell
+     # По USB (автоматически поднимет adb forward)
+     .\awc-vcam.exe --mode usb
+
+     # Или по Wi-Fi / локальной точке доступа
+     .\awc-vcam.exe --mode wifi --host 192.168.x.x
+     ```
+   - Откройте **VTube Studio** → настройки камеры → выберите **`AndroidWebCamera`** (`1280x720`, `60 FPS`).
+   - Для удаления виртуальной камеры из системы запустите `uninstall-vcam.bat` от имени администратора.
+2. **Через браузер / Wi-Fi / Точку доступа**: откройте `http://<IP-телефона>:8080/`.
+3. **Через USB (`awc-bridge-windows-amd64.exe`)**:
    ```powershell
    .\awc-bridge-windows-amd64.exe --mode usb --open
    ```
-3. **В качестве виртуальной камеры на Win64**: откройте **OBS Studio** → добавьте *Источник медиа (Media Source)*, снимите галочку *Локальный файл* и вставьте `http://127.0.0.1:8080/stream.h264` (или используйте *Браузер* с `http://127.0.0.1:8080/`) → нажмите **Запустить виртуальную камеру** в OBS.
+4. **Через OBS Studio**: установите нативный плагин `obs-android-webcamera-windows-x64.zip` из GitHub Actions (или добавьте *Источник медиа* `http://127.0.0.1:8080/stream.h264`).

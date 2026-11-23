@@ -17,6 +17,11 @@ pc-bridge/*.exe
 obs-plugin/build/
 obs-plugin/dist/
 
+# Windows Virtual Camera
+win-vcam/build*/
+win-vcam/pkg/
+win-vcam/*.zip
+
 # OS / Editor
 .DS_Store
 Thumbs.db
