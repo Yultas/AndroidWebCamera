@@ -52,8 +52,14 @@ class MjpegEncoder(
         }
     }
 
+    @Volatile
+    private var producedFrame = false
+
     override val inputSurface: Surface
         get() = imageReader.surface
+
+    override val hasProducedFrame: Boolean
+        get() = producedFrame
 
     override fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -122,6 +128,7 @@ class MjpegEncoder(
             YuvImage(nv21Buffer, ImageFormat.NV21, width, height, null)
                 .compressToJpeg(cropRect, jpegQuality, jpegStream)
             frameHub.publishJpeg(jpegStream.toByteArray(), generation)
+            producedFrame = true
         } catch (t: Throwable) {
             if (running.get()) {
                 Log.w(TAG, "JPEG encode error", t)

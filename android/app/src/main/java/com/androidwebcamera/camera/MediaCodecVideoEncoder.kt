@@ -44,6 +44,9 @@ class MediaCodecVideoEncoder(
     @Volatile
     private var firstFrameLogged = false
 
+    override val hasProducedFrame: Boolean
+        get() = firstFrameLogged
+
     init {
         val (configuredCodec, surface) = initializeCodecWithFallback()
         codec = configuredCodec
@@ -104,7 +107,7 @@ class MediaCodecVideoEncoder(
     }
 
     private fun initializeCodecWithFallback(): Pair<MediaCodec, Surface> {
-        val candidates = CodecCapabilityDetector.findEncodersFor(codecType, width, height)
+        val candidates = CodecCapabilityDetector.findEncodersFor(codecType, width, height, fps)
         var lastError: Throwable? = null
 
         val candidateNames: List<String?> = if (candidates.isNotEmpty()) {
@@ -148,20 +151,33 @@ class MediaCodecVideoEncoder(
             MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency
         ) == true && !isHisi
 
+        val preferredBitrateMode = if (codecType == StreamCodec.H265 &&
+            caps?.encoderCapabilities?.isBitrateModeSupported(
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+            ) == true
+        ) {
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR
+        } else if (caps?.encoderCapabilities?.isBitrateModeSupported(
+                MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+            ) == true
+        ) {
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
+        } else {
+            null
+        }
+
         val preferredFormat = buildBaseFormat().apply {
-            if (caps?.encoderCapabilities?.isBitrateModeSupported(
-                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
-                ) == true
-            ) {
-                setInteger(
-                    MediaFormat.KEY_BITRATE_MODE,
-                    MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR
-                )
+            if (preferredBitrateMode != null) {
+                setInteger(MediaFormat.KEY_BITRATE_MODE, preferredBitrateMode)
             }
+            // Disable B-frames so hardware HEVC/AVC encoders emit strictly monotonic, zero-reorder frames.
+            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+            // Lock hardware encoder clock to realtime pacing to eliminate Exynos/Qualcomm batch bursts.
+            setInteger(MediaFormat.KEY_PRIORITY, 0)
+            setFloat(MediaFormat.KEY_OPERATING_RATE, fps.toFloat())
             if (supportsLowLatency) {
                 setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                 setInteger(MediaFormat.KEY_LATENCY, 0)
-                setInteger(MediaFormat.KEY_PRIORITY, 0)
             }
             if ((codecType == StreamCodec.H264 || codecType == StreamCodec.H265) && !isHisi) {
                 setInteger(MediaFormat.KEY_PREPEND_HEADER_TO_SYNC_FRAMES, 1)

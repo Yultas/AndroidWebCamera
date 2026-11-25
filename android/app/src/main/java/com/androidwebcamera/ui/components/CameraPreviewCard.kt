@@ -119,22 +119,38 @@ fun CameraPreviewCard(
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            val activePreviewVisible = state.isStreaming && showPreview
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                    .aspectRatio(if (activePreviewVisible) 4f / 3f else 16f / 9f)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    .background(
+                        if (activePreviewVisible) {
+                            androidx.compose.ui.graphics.Color(0xFF0E1116)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHighest
+                        }
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                if (state.isStreaming && showPreview) {
+                if (activePreviewVisible) {
                     val sensorOrientation by rememberUpdatedState(state.activeCamera?.sensorOrientation ?: 90)
                     val isFront by rememberUpdatedState(state.activeCamera?.facing == LensFacing.FRONT)
                     val videoW by rememberUpdatedState(state.config.width)
                     val videoH by rememberUpdatedState(state.config.height)
                     val previewRes by rememberUpdatedState(
-                        remember(state.activeCamera?.id, state.config.width, state.config.height) {
-                            state.activeCamera?.previewResolutionFor(state.config.width, state.config.height)
+                        remember(
+                            state.activeCamera?.id,
+                            state.config.width,
+                            state.config.height,
+                            state.config.fps
+                        ) {
+                            state.activeCamera?.previewResolutionFor(
+                                state.config.width,
+                                state.config.height,
+                                state.config.fps
+                            )
                                 ?: VideoResolution(
                                     minOf(state.config.width, 1280),
                                     minOf(state.config.height, 720)
@@ -315,36 +331,43 @@ private fun configurePreviewTransform(
         else -> 0
     }
 
-    val relativeRotation = if (isFrontCamera) {
-        (sensorOrientation + displayDegrees) % 360
-    } else {
-        (sensorOrientation - displayDegrees + 360) % 360
-    }
+    // Android's TextureView HardwareLayer already applies SurfaceTexture's native transform
+    // (sensorOrientation 90/270 + front-camera selfie mirror) for ROTATION_0 (portrait).
+    // Applying sensorOrientation a second time rotates the image sideways and stretches it.
+    val sensorSwapsAxes = (sensorOrientation % 180) != 0
+    val uprightWidth = if (sensorSwapsAxes) videoHeight.toFloat() else videoWidth.toFloat()
+    val uprightHeight = if (sensorSwapsAxes) videoWidth.toFloat() else videoHeight.toFloat()
 
     val viewRatio = viewWidth.toFloat() / viewHeight.toFloat()
-    val videoRatio = videoWidth.toFloat() / videoHeight.toFloat()
 
-    if (relativeRotation == 90 || relativeRotation == 270) {
-        matrix.postRotate(relativeRotation.toFloat(), cx, cy)
-        val rotatedRatio = videoHeight.toFloat() / videoWidth.toFloat()
-        val targetH = if (rotatedRatio > viewRatio) viewWidth.toFloat() / rotatedRatio else viewHeight.toFloat()
-        val targetW = targetH * rotatedRatio
-        val sx = targetW / viewHeight.toFloat()
-        val sy = targetH / viewWidth.toFloat()
-        matrix.postScale(sx, sy, cx, cy)
-    } else {
-        if (relativeRotation != 0) {
-            matrix.postRotate(relativeRotation.toFloat(), cx, cy)
-        }
-        if (videoRatio > viewRatio) {
-            matrix.postScale(1f, viewRatio / videoRatio, cx, cy)
+    if (displayDegrees == 90 || displayDegrees == 270) {
+        val extraRotate = (360 - displayDegrees).toFloat()
+        matrix.postRotate(extraRotate, cx, cy)
+        val landscapeRatio = uprightHeight / uprightWidth
+        val targetW: Float
+        val targetH: Float
+        if (landscapeRatio > viewRatio) {
+            targetW = viewWidth.toFloat()
+            targetH = targetW / landscapeRatio
         } else {
-            matrix.postScale(videoRatio / viewRatio, 1f, cx, cy)
+            targetH = viewHeight.toFloat()
+            targetW = targetH * landscapeRatio
+        }
+        // After ±90° rotation around center, the unscaled quad spans (viewHeight x viewWidth)
+        matrix.postScale(targetW / viewHeight.toFloat(), targetH / viewWidth.toFloat(), cx, cy)
+    } else {
+        if (displayDegrees == 180) {
+            matrix.postRotate(180f, cx, cy)
+        }
+        val contentRatio = uprightWidth / uprightHeight
+        if (contentRatio > viewRatio) {
+            matrix.postScale(1f, viewRatio / contentRatio, cx, cy)
+        } else {
+            matrix.postScale(contentRatio / viewRatio, 1f, cx, cy)
         }
     }
 
-    val effectiveMirror = if (isFrontCamera) !mirrored else mirrored
-    if (effectiveMirror) {
+    if (mirrored) {
         matrix.postScale(-1f, 1f, cx, cy)
     }
     view.setTransform(matrix)

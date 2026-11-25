@@ -17,8 +17,26 @@ object CodecCapabilityDetector {
     data class EncoderCandidate(
         val name: String,
         val isHardware: Boolean,
-        val supportsRequestedSize: Boolean
+        val supportsRequestedSize: Boolean,
+        val supportsRequestedRate: Boolean = true
     )
+
+    /**
+     * Returns true if at least one hardware surface encoder (H.264, H.265, or AV1) supports
+     * encoding [width]x[height] at [fps] without falling back to CPU software encoding.
+     */
+    fun isHardwareEncodeSupported(width: Int, height: Int, fps: Int): Boolean {
+        val allInfos = runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.toList()
+        }.getOrDefault(emptyList())
+        if (allInfos.isEmpty()) return true // Unit-test / stubbed environment fallback
+        return StreamCodec.entries
+            .filter { it.isMediaCodec && it.mimeType != null }
+            .any { codec ->
+                findCandidates(allInfos, codec.mimeType!!, width, height, fps)
+                    .any { it.isHardware && it.supportsRequestedSize && it.supportsRequestedRate }
+            }
+    }
 
     fun detectSupportedCodecs(): List<CodecSupportInfo> {
         val allInfos = runCatching {
@@ -67,19 +85,25 @@ object CodecCapabilityDetector {
      * 3. Software encoders supporting the requested resolution
      * 4. Software encoders (fallback)
      */
-    fun findEncodersFor(codec: StreamCodec, width: Int, height: Int): List<EncoderCandidate> {
+    fun findEncodersFor(
+        codec: StreamCodec,
+        width: Int,
+        height: Int,
+        fps: Int = 30
+    ): List<EncoderCandidate> {
         val mime = codec.mimeType ?: return emptyList()
         val allInfos = runCatching {
             MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.toList()
         }.getOrDefault(emptyList())
-        return findCandidates(allInfos, mime, width, height)
+        return findCandidates(allInfos, mime, width, height, fps)
     }
 
     private fun findCandidates(
         codecInfos: List<MediaCodecInfo>,
         mimeType: String,
         width: Int,
-        height: Int
+        height: Int,
+        fps: Int = 30
     ): List<EncoderCandidate> {
         val matches = mutableListOf<EncoderCandidate>()
         for (info in codecInfos) {
@@ -100,21 +124,31 @@ object CodecCapabilityDetector {
                 lowerName.startsWith("c2.android.")
             val isHardware = info.isHardwareAccelerated && !isSoftware
 
+            val videoCaps = caps.videoCapabilities
             val sizeSupported = runCatching {
-                caps.videoCapabilities?.isSizeSupported(width, height) ?: true
+                videoCaps?.isSizeSupported(width, height) ?: true
             }.getOrDefault(true)
+            val rateSupported = runCatching {
+                if (!sizeSupported) {
+                    false
+                } else {
+                    videoCaps?.areSizeAndRateSupported(width, height, fps.toDouble()) ?: true
+                }
+            }.getOrDefault(sizeSupported)
 
             matches.add(
                 EncoderCandidate(
                     name = info.name,
                     isHardware = isHardware,
-                    supportsRequestedSize = sizeSupported
+                    supportsRequestedSize = sizeSupported,
+                    supportsRequestedRate = rateSupported
                 )
             )
         }
 
         return matches.sortedWith(
             compareByDescending<EncoderCandidate> { it.isHardware }
+                .thenByDescending { it.supportsRequestedSize && it.supportsRequestedRate }
                 .thenByDescending { it.supportsRequestedSize }
                 .thenBy { it.name }
         )

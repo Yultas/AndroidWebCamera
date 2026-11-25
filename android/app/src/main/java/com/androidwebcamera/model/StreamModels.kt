@@ -79,7 +79,8 @@ data class CameraDescriptor(
     val sensorOrientation: Int,
     val hasFlash: Boolean,
     val supportedResolutions: List<VideoResolution>,
-    val supportedFpsByResolution: Map<VideoResolution, List<Int>>
+    val supportedFpsByResolution: Map<VideoResolution, List<Int>>,
+    val highSpeedFpsByResolution: Map<VideoResolution, List<Int>> = emptyMap()
 ) {
     fun bestResolutionOrNull(width: Int, height: Int): VideoResolution? =
         supportedResolutions.firstOrNull { it.width == width && it.height == height }
@@ -90,8 +91,17 @@ data class CameraDescriptor(
     fun supportedFpsFor(resolution: VideoResolution): List<Int> =
         supportedFpsByResolution[resolution] ?: listOf(30)
 
-    /** Picks a preview size with matching aspect ratio capped at 1280x720 for LIMITED HAL stability. */
-    fun previewResolutionFor(videoWidth: Int, videoHeight: Int): VideoResolution {
+    fun isHighSpeedMode(width: Int, height: Int, fps: Int): Boolean =
+        highSpeedFpsByResolution[VideoResolution(width, height)]?.contains(fps) == true
+
+    /**
+     * Picks a preview size with matching aspect ratio capped at 1280x720 for regular sessions
+     * (keeping thermal/GPU load minimal), or matching exact video size when [SESSION_HIGH_SPEED] requires it.
+     */
+    fun previewResolutionFor(videoWidth: Int, videoHeight: Int, fps: Int = 30): VideoResolution {
+        if (isHighSpeedMode(videoWidth, videoHeight, fps)) {
+            return VideoResolution(videoWidth, videoHeight)
+        }
         val targetAspect = if (videoHeight > 0) videoWidth.toFloat() / videoHeight.toFloat() else 16f / 9f
         val capped = supportedResolutions.filter { it.width <= 1280 && it.height <= 720 }
         val sameAspect = capped.filter { kotlin.math.abs(it.aspectRatio - targetAspect) < 0.08f }
@@ -135,7 +145,7 @@ data class StreamConfig(
 
         val clampedBase = copy(
             codec = normalizedCodec,
-            bitrateKbps = bitrateKbps.coerceIn(500, 20000),
+            bitrateKbps = bitrateKbps.coerceIn(500, 40000),
             jpegQuality = jpegQuality.coerceIn(40, 95),
             port = port.coerceIn(1024, 65535),
             rotationDegrees = ((rotationDegrees % 360) + 360) % 360

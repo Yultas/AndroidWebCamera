@@ -52,7 +52,7 @@ class StreamModelsTest {
         assertEquals(720, normalized.height)
         assertEquals(30, normalized.fps)
         assertEquals(StreamCodec.H264, normalized.codec)
-        assertEquals(20000, normalized.bitrateKbps)
+        assertEquals(40000, normalized.bitrateKbps)
         assertEquals(40, normalized.jpegQuality)
         assertEquals(1024, normalized.port)
         assertEquals(270, normalized.rotationDegrees)
@@ -119,11 +119,26 @@ class StreamModelsTest {
             sensorOrientation = 90,
             hasFlash = true,
             supportedResolutions = listOf(r4k, r1080, r720, rVga),
-            supportedFpsByResolution = emptyMap()
+            supportedFpsByResolution = mapOf(r1080 to listOf(30, 60)),
+            highSpeedFpsByResolution = mapOf(r1080 to listOf(60))
         )
 
-        assertEquals(r720, cam.previewResolutionFor(1920, 1080))
-        assertEquals(r720, cam.previewResolutionFor(3840, 2160))
-        assertEquals(rVga, cam.previewResolutionFor(640, 480))
+        assertEquals(r720, cam.previewResolutionFor(1920, 1080, fps = 30))
+        assertEquals(r1080, cam.previewResolutionFor(1920, 1080, fps = 60))
+        assertEquals(r720, cam.previewResolutionFor(3840, 2160, fps = 30))
+        assertEquals(rVga, cam.previewResolutionFor(640, 480, fps = 30))
+    }
+
+    @Test
+    fun parseCameraIdHandlesLogicalAndPhysicalIds() {
+        val standalone = com.androidwebcamera.camera.CameraEnumerator.parseCameraId("0")
+        assertEquals("0", standalone.logicalId)
+        assertNull(standalone.physicalId)
+        assertEquals("0", standalone.effectiveCharacteristicsId)
+
+        val composite = com.androidwebcamera.camera.CameraEnumerator.parseCameraId("0:52")
+        assertEquals("0", composite.logicalId)
+        assertEquals("52", composite.physicalId)
+        assertEquals("52", composite.effectiveCharacteristicsId)
     }
 }

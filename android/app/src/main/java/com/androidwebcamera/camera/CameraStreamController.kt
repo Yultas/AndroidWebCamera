@@ -6,6 +6,8 @@ import android.graphics.ImageFormat
 import android.hardware.HardwareBuffer
 import android.hardware.camera2.CameraAccessException
 import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraConstrainedHighSpeedCaptureSession
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
@@ -37,7 +39,8 @@ import java.util.concurrent.TimeUnit
 class CameraStreamController(
     context: Context,
     private val frameHub: FrameHub,
-    private val onFatalError: (String) -> Unit
+    private val onFatalError: (String) -> Unit,
+    private val onConfigFallback: ((StreamConfig, String) -> Unit)? = null
 ) {
     private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
     private val handlerThread = HandlerThread("AwcCamera2").apply { start() }
@@ -57,7 +60,13 @@ class CameraStreamController(
     private var encoder: VideoEncoder? = null
     private var cameraDevice: CameraDevice? = null
     private var captureSession: CameraCaptureSession? = null
+    private var activeTarget: CameraEnumerator.CameraTargetId = CameraEnumerator.CameraTargetId("0", null)
+    private var activeHighSpeed: Boolean = false
+    private var activeExtendedVendorFps: Boolean = false
+    private var activeAfMode: Int = CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
+    private var activeHasFlash: Boolean = false
     private var activeFpsRange: Range<Int>? = null
+    private var highFpsWatchdogRunnable: Runnable? = null
     private var currentConfig: StreamConfig? = null
 
     /** Desired preview surface requested by UI. */
@@ -310,16 +319,40 @@ class CameraStreamController(
     private fun openCameraOnHandler(config: StreamConfig) {
         val epoch = ++openingEpoch
         try {
-            val chars = cameraManager.getCameraCharacteristics(config.cameraId)
-            activeFpsRange = CameraEnumerator.selectFpsRange(chars, config.fps)
+            val target = CameraEnumerator.parseCameraId(config.cameraId)
+            val chars = cameraManager.getCameraCharacteristics(target.effectiveCharacteristicsId)
+            val isPhysicalSub = target.physicalId != null
+            activeTarget = target
+            activeHighSpeed = config.codec.isMediaCodec &&
+                CameraEnumerator.shouldUseHighSpeedSession(
+                    characteristics = chars,
+                    width = config.width,
+                    height = config.height,
+                    targetFps = config.fps,
+                    isPhysicalSubCamera = isPhysicalSub
+                )
+            val maxAeUpper = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                ?.maxOfOrNull { it.upper } ?: 30
+            activeExtendedVendorFps = !activeHighSpeed && config.fps > maxAeUpper
+            activeAfMode = CameraEnumerator.selectAfMode(chars)
+            activeHasFlash = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            activeFpsRange = CameraEnumerator.selectFpsRange(
+                characteristics = chars,
+                width = config.width,
+                height = config.height,
+                targetFps = config.fps,
+                useHighSpeed = activeHighSpeed
+            )
             Log.i(
                 TAG,
-                "Opening camera=${config.cameraId} ${config.width}x${config.height}@${config.fps}fps " +
-                    "codec=${config.codec.apiValue} fpsRange=$activeFpsRange preview=${previewSurface?.isValid == true}"
+                "Opening camera=${config.cameraId} (open=${target.logicalId}, phys=${target.physicalId}) " +
+                    "${config.width}x${config.height}@${config.fps}fps codec=${config.codec.apiValue} " +
+                    "highSpeed=$activeHighSpeed vendorHighFps=$activeExtendedVendorFps " +
+                    "fpsRange=$activeFpsRange preview=${previewSurface?.isValid == true}"
             )
 
             cameraManager.openCamera(
-                config.cameraId,
+                target.logicalId,
                 object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
                         if (epoch != openingEpoch || released) {
@@ -443,7 +476,8 @@ class CameraStreamController(
         val previewForSession: Surface? = if (uiPreview != null) {
             scheduleDummyPreviewRelease()
             uiPreview
-        } else if (currentConfig?.codec?.isMediaCodec == true) {
+        } else if (!activeHighSpeed && currentConfig?.codec?.isMediaCodec == true) {
+            // ImageReader is forbidden in SESSION_HIGH_SPEED, so only attach dummy sink in regular sessions.
             ensureDummyPreviewSurface(currentConfig)
         } else {
             scheduleDummyPreviewRelease()
@@ -453,7 +487,14 @@ class CameraStreamController(
             targets.add(previewForSession)
         }
 
-        val outputs = targets.map { OutputConfiguration(it) }
+        val physId = activeTarget.physicalId?.takeIf { !activeHighSpeed }
+        val outputs = targets.map { surface ->
+            OutputConfiguration(surface).apply {
+                if (physId != null) {
+                    setPhysicalCameraId(physId)
+                }
+            }
+        }
         val epoch = openingEpoch
 
         val callback = object : CameraCaptureSession.StateCallback() {
@@ -481,7 +522,11 @@ class CameraStreamController(
                 if (epoch != openingEpoch || closingCamera || released || cameraDevice !== device) {
                     return
                 }
-                Log.e(TAG, "CameraCaptureSession.onConfigureFailed (targets=${targets.size}, fpsRange=$activeFpsRange)")
+                Log.e(
+                    TAG,
+                    "CameraCaptureSession.onConfigureFailed (targets=${targets.size}, " +
+                        "highSpeed=$activeHighSpeed, vendorHighFps=$activeExtendedVendorFps, fpsRange=$activeFpsRange)"
+                )
                 if (previewForSession != null) {
                     if (previewSurface === previewForSession) {
                         previewSurface = null
@@ -497,6 +542,10 @@ class CameraStreamController(
                     return
                 }
                 val cfg = currentConfig
+                if (cfg != null && cfg.fps > 30) {
+                    downgradeHighFpsAndReopen(cfg)
+                    return
+                }
                 if (cfg != null && sessionRecoveryAttempts < MAX_SESSION_RECOVERY_ATTEMPTS) {
                     sessionRecoveryAttempts++
                     Log.w(TAG, "Attempting automatic camera reopen recovery #$sessionRecoveryAttempts after onConfigureFailed")
@@ -511,18 +560,30 @@ class CameraStreamController(
         }
 
         try {
+            val sessionType = if (activeHighSpeed) {
+                SessionConfiguration.SESSION_HIGH_SPEED
+            } else {
+                SessionConfiguration.SESSION_REGULAR
+            }
             val sessionConfig = SessionConfiguration(
-                SessionConfiguration.SESSION_REGULAR,
+                sessionType,
                 outputs,
                 executor,
                 callback
             )
+            if (!activeHighSpeed) {
+                configureRegularSessionParameters(device, sessionConfig)
+            }
             device.createCaptureSession(sessionConfig)
         } catch (t: Throwable) {
             sessionConfiguring = false
             Log.e(TAG, "createCaptureSession threw", t)
-            // After waitUntilIdle(-110) or HAL stream error, CameraDevice is wedged and must be reopened cleanly.
             val cfg = currentConfig
+            if (cfg != null && cfg.fps > 30) {
+                downgradeHighFpsAndReopen(cfg)
+                return
+            }
+            // After waitUntilIdle(-110) or HAL stream error, CameraDevice is wedged and must be reopened cleanly.
             if (cfg != null && sessionRecoveryAttempts < MAX_SESSION_RECOVERY_ATTEMPTS) {
                 sessionRecoveryAttempts++
                 Log.w(TAG, "Recovering from createCaptureSession error by reopening camera (attempt #$sessionRecoveryAttempts)")
@@ -533,6 +594,32 @@ class CameraStreamController(
             stopInternalOnHandler(closeSubscribers = true)
             onFatalError("Сбой запуска сессии камеры: ${t.message}")
         }
+    }
+
+    private fun configureRegularSessionParameters(
+        device: CameraDevice,
+        sessionConfig: SessionConfiguration
+    ) {
+        val cfg = currentConfig ?: return
+        runCatching {
+            val paramBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
+                activeFpsRange?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
+                if (activeExtendedVendorFps) {
+                    CameraEnumerator.applyVendorHighFpsKeys(this, cfg.fps)
+                }
+            }
+            sessionConfig.sessionParameters = paramBuilder.build()
+        }
+    }
+
+    private fun downgradeHighFpsAndReopen(cfg: StreamConfig) {
+        val fallbackCfg = cfg.copy(fps = 30)
+        val notice = "Камера отклонила режим ${cfg.width}×${cfg.height}@${cfg.fps} FPS — выполнен переход на 30 FPS"
+        Log.w(TAG, notice)
+        sessionRecoveryAttempts = 0
+        onConfigFallback?.invoke(fallbackCfg, notice)
+        val gen = frameHub.beginNewStream(closeExistingSubscribers = true)
+        startOnHandler(fallbackCfg, gen)
     }
 
     private fun applyRepeatingRequestOnHandler() {
@@ -551,26 +638,37 @@ class CameraStreamController(
                     addTarget(configuredPreview)
                 }
                 set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
-                set(
-                    CaptureRequest.CONTROL_AF_MODE,
-                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO
-                )
+                set(CaptureRequest.CONTROL_AF_MODE, activeAfMode)
                 activeFpsRange?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-
-                val flashMode = if (cfg.torchEnabled) {
-                    CameraMetadata.FLASH_MODE_TORCH
-                } else {
-                    CameraMetadata.FLASH_MODE_OFF
+                if (!activeHighSpeed && activeExtendedVendorFps) {
+                    CameraEnumerator.applyVendorHighFpsKeys(this, cfg.fps)
                 }
-                set(CaptureRequest.FLASH_MODE, flashMode)
+
+                if (!activeHighSpeed && activeHasFlash) {
+                    val flashMode = if (cfg.torchEnabled) {
+                        CameraMetadata.FLASH_MODE_TORCH
+                    } else {
+                        CameraMetadata.FLASH_MODE_OFF
+                    }
+                    set(CaptureRequest.FLASH_MODE, flashMode)
+                }
             }
-            session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            if (session is CameraConstrainedHighSpeedCaptureSession) {
+                val burst = session.createHighSpeedRequestList(builder.build())
+                session.setRepeatingBurst(burst, null, cameraHandler)
+            } else {
+                session.setRepeatingRequest(builder.build(), null, cameraHandler)
+            }
+            scheduleHighFpsFirstFrameWatchdog(device, enc, cfg, openingEpoch)
         } catch (iae: IllegalArgumentException) {
             Log.w(TAG, "applyRepeatingRequest had stale surface, rebuilding session", iae)
             sessionPreviewSurface = null
             scheduleSessionRebuildOnHandler()
         } catch (t: Throwable) {
             Log.w(TAG, "applyRepeatingRequest failed", t)
+            if (cfg.fps > 30) {
+                downgradeHighFpsAndReopen(cfg)
+            }
         }
     }
 
@@ -582,8 +680,39 @@ class CameraStreamController(
         onFatalError(message)
     }
 
+    private fun cancelHighFpsWatchdog() {
+        highFpsWatchdogRunnable?.let { cameraHandler.removeCallbacks(it) }
+        highFpsWatchdogRunnable = null
+    }
+
+    private fun scheduleHighFpsFirstFrameWatchdog(
+        device: CameraDevice,
+        enc: VideoEncoder,
+        cfg: StreamConfig,
+        epoch: Int
+    ) {
+        cancelHighFpsWatchdog()
+        if (cfg.fps <= 30 || enc.hasProducedFrame) return
+        val runnable = Runnable {
+            highFpsWatchdogRunnable = null
+            if (epoch == openingEpoch &&
+                !closingCamera &&
+                !released &&
+                cameraDevice === device &&
+                encoder === enc &&
+                !enc.hasProducedFrame
+            ) {
+                Log.w(TAG, "High-FPS watchdog triggered: 0 frames produced after 2.2s at ${cfg.width}x${cfg.height}@${cfg.fps}fps")
+                downgradeHighFpsAndReopen(cfg)
+            }
+        }
+        highFpsWatchdogRunnable = runnable
+        cameraHandler.postDelayed(runnable, 2200L)
+    }
+
     private fun stopInternalOnHandler(closeSubscribers: Boolean) {
         openingEpoch++
+        cancelHighFpsWatchdog()
         sessionConfiguring = false
         needsSessionRebuild = false
         sessionPreviewSurface = null
@@ -675,7 +804,14 @@ class CameraStreamController(
     ) {
         if (closingCamera || released || cameraDevice !== device || encoder !== enc) return
         sessionConfiguring = true
-        val outputs = listOf(OutputConfiguration(enc.inputSurface))
+        val physId = activeTarget.physicalId?.takeIf { !activeHighSpeed }
+        val outputs = listOf(
+            OutputConfiguration(enc.inputSurface).apply {
+                if (physId != null) {
+                    setPhysicalCameraId(physId)
+                }
+            }
+        )
         val cb = object : CameraCaptureSession.StateCallback() {
             override fun onConfigured(session: CameraCaptureSession) {
                 sessionConfiguring = false
@@ -695,6 +831,10 @@ class CameraStreamController(
                 sessionConfiguring = false
                 if (epoch != openingEpoch || closingCamera || released || cameraDevice !== device) return
                 val cfg = currentConfig
+                if (cfg != null && cfg.fps > 30) {
+                    downgradeHighFpsAndReopen(cfg)
+                    return
+                }
                 if (cfg != null && sessionRecoveryAttempts < MAX_SESSION_RECOVERY_ATTEMPTS) {
                     sessionRecoveryAttempts++
                     startOnHandler(cfg, frameHub.currentGeneration)
@@ -706,11 +846,23 @@ class CameraStreamController(
             }
         }
         try {
-            device.createCaptureSession(
-                SessionConfiguration(SessionConfiguration.SESSION_REGULAR, outputs, executor, cb)
-            )
+            val sessionType = if (activeHighSpeed) {
+                SessionConfiguration.SESSION_HIGH_SPEED
+            } else {
+                SessionConfiguration.SESSION_REGULAR
+            }
+            val sessionConfig = SessionConfiguration(sessionType, outputs, executor, cb)
+            if (!activeHighSpeed) {
+                configureRegularSessionParameters(device, sessionConfig)
+            }
+            device.createCaptureSession(sessionConfig)
         } catch (t: Throwable) {
             sessionConfiguring = false
+            val cfg = currentConfig
+            if (cfg != null && cfg.fps > 30) {
+                downgradeHighFpsAndReopen(cfg)
+                return
+            }
             pendingStart = null
             stopInternalOnHandler(closeSubscribers = true)
             onFatalError("Сбой запуска сессии камеры: ${t.message}")

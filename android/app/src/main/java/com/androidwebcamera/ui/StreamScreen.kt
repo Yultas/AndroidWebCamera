@@ -78,7 +78,18 @@ fun StreamScreen(
     val powerManager = remember(context) {
         context.getSystemService(PowerManager::class.java)
     }
-    val isIgnoringBatteryOpt = remember(context, state.isStreaming) {
+    var batteryCheckTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                batteryCheckTick++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isIgnoringBatteryOpt = remember(context, state.isStreaming, batteryCheckTick) {
         powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: true
     }
 
@@ -173,16 +184,22 @@ fun StreamScreen(
                 item(key = "battery_banner") {
                     BatteryOptimizationBanner(
                         onOpenSettings = {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.fromParts("package", context.packageName, null)
-                            }
-                            runCatching { context.startActivity(intent) }.onFailure {
-                                runCatching {
+                            val pkgUri = Uri.fromParts("package", context.packageName, null)
+                            val directRequestIntent = Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                pkgUri
+                            )
+                            runCatching { context.startActivity(directRequestIntent) }
+                                .recoverCatching {
                                     context.startActivity(
                                         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                                     )
                                 }
-                            }
+                                .recoverCatching {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkgUri)
+                                    )
+                                }
                         },
                         onDismiss = { dismissBatteryHint = true }
                     )
@@ -250,6 +267,7 @@ private fun BatteryOptimizationBanner(
     onDismiss: () -> Unit
 ) {
     Card(
+        onClick = onOpenSettings,
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.tertiaryContainer

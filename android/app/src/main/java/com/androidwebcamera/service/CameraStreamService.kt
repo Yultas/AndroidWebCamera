@@ -74,6 +74,16 @@ class CameraStreamService : Service() {
                     stopStreamingPipeline()
                     stopSelf()
                 }
+            },
+            onConfigFallback = { fallbackCfg, notice ->
+                serviceScope.launch {
+                    StreamRepository.mutateState {
+                        it.copy(
+                            config = fallbackCfg,
+                            errorMessage = notice
+                        )
+                    }
+                }
             }
         )
         httpServer = StreamHttpServer(

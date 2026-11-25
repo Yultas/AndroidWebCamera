@@ -561,6 +561,15 @@
         return out >>> 0;
       }
 
+      function trimNalTrailingZeros(nal) {
+        if (!nal || nal.length <= 2) return nal;
+        let end = nal.length;
+        while (end > 2 && nal[end - 1] === 0) {
+          end--;
+        }
+        return end === nal.length ? nal : nal.subarray(0, end);
+      }
+
       /** Builds RFC 6381 / ISO 14496-15 Annex E.3 HEVC codec string (e.g. hvc1.1.6.L93.90). */
       function hevcCodecString(sps, prefix = "hvc1") {
         const info = parseHevcSps(sps);
@@ -575,7 +584,10 @@
         }
         const constraintParts = [];
         for (let i = 0; i <= lastNonZero; i++) {
-          constraintParts.push(info.constraintBytes[i].toString(16).toUpperCase());
+          const b = (i === 0 && lastNonZero === 0 && info.constraintBytes[0] === 0)
+            ? 0xB0
+            : info.constraintBytes[i];
+          constraintParts.push(b.toString(16).toUpperCase());
         }
         return `${prefix}.${profilePart}.${compatHex}.${tierLevel}.${constraintParts.join(".")}`;
       }
@@ -1389,8 +1401,14 @@
             if (v.buffered.length > 0) {
               const start = v.buffered.start(0);
               const end = v.buffered.end(v.buffered.length - 1);
-              if (end - v.currentTime > 0.35) {
-                v.currentTime = end - 0.05;
+              const lag = end - v.currentTime;
+              if (lag > 1.5) {
+                v.currentTime = end - 0.08;
+                v.playbackRate = 1.0;
+              } else if (lag > 0.18) {
+                if (v.playbackRate !== 1.08) v.playbackRate = 1.08;
+              } else if (v.playbackRate !== 1.0) {
+                v.playbackRate = 1.0;
               }
               if (v.paused) {
                 v.play().catch(() => {});
@@ -1439,9 +1457,26 @@
         if (!mseState || !mseState.sourceBuffer || mseState.sourceBuffer.updating || state.mseEvicting) return;
         if (state.mseQueue.length === 0) return;
         trimMseQueueSafely();
-        const item = state.mseQueue.shift();
+        let payloadToAppend;
+        if (state.mseQueue[0].isInit || state.mseQueue.length === 1) {
+          payloadToAppend = state.mseQueue.shift().data;
+        } else {
+          let totalBytes = 0;
+          let count = 0;
+          while (count < state.mseQueue.length && !state.mseQueue[count].isInit && count < 12) {
+            totalBytes += state.mseQueue[count].data.length;
+            count++;
+          }
+          payloadToAppend = new Uint8Array(totalBytes);
+          let offset = 0;
+          for (let i = 0; i < count; i++) {
+            const seg = state.mseQueue.shift().data;
+            payloadToAppend.set(seg, offset);
+            offset += seg.length;
+          }
+        }
         try {
-          mseState.sourceBuffer.appendBuffer(item.data);
+          mseState.sourceBuffer.appendBuffer(payloadToAppend);
         } catch (err) {
           if (err && err.name === "QuotaExceededError") {
             const v = dom.mseVideo;
@@ -1518,9 +1553,9 @@
             const frameNals = [];
             for (const nal of nals) {
               const nalType = (nal[0] >>> 1) & 0x3f;
-              if (nalType === 32) state.vps = nal.slice();
-              else if (nalType === 33) state.sps = nal.slice();
-              else if (nalType === 34) state.pps = nal.slice();
+              if (nalType === 32) state.vps = trimNalTrailingZeros(nal).slice();
+              else if (nalType === 33) state.sps = trimNalTrailingZeros(nal).slice();
+              else if (nalType === 34) state.pps = trimNalTrailingZeros(nal).slice();
               else if (nalType !== 35) frameNals.push(nal);
             }
             if (type === 1) {
@@ -1571,7 +1606,7 @@
               return;
             }
             if (dec.state === "configured") {
-              if (dec.decodeQueueSize > 4 && !isKey) {
+              if (dec.decodeQueueSize > 18 && !isKey) {
                 // Dropping a delta frame requires waiting for the next keyframe to prevent corruption
                 state.waitingForKeyFrame = true;
                 return;
@@ -1798,6 +1833,7 @@
           const info = supportById[cid];
           const supported = info ? !!info.supported : (cid === "h264" || cid === "mjpeg");
           btn.disabled = !supported;
+          btn.style.display = supported ? "" : "none";
           btn.classList.toggle("selected", cid === s.codec);
           btn.title = supported
             ? (info && info.encoder ? `Энкодер: ${info.encoder}` : "")

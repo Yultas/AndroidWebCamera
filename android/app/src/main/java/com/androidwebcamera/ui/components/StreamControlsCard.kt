@@ -135,26 +135,18 @@ fun StreamControlsCard(
                     StreamCodec.entries.forEach { codec ->
                         val info = state.supportedCodecs.firstOrNull { it.codec == codec }
                         val supported = info?.supported ?: (codec == StreamCodec.MJPEG)
-                        val labelText = when {
-                            !supported -> "${codec.displayName} (н/д)"
-                            codec.isMediaCodec && info?.isHardware == false -> "${codec.displayName} (SW)"
-                            else -> codec.displayName
+                        if (!supported) return@forEach
+                        val labelText = if (codec.isMediaCodec && info?.isHardware == false) {
+                            "${codec.displayName} (SW)"
+                        } else {
+                            codec.displayName
                         }
                         FilterChip(
                             selected = config.codec == codec,
-                            enabled = supported,
                             onClick = { onUpdateConfig { it.copy(codec = codec) } },
                             label = { Text(labelText) }
                         )
                     }
-                }
-                val unsupported = state.supportedCodecs.filter { !it.supported }.map { it.codec.displayName }
-                if (unsupported.isNotEmpty()) {
-                    Text(
-                        text = "Недоступно на этом устройстве: ${unsupported.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
 
@@ -164,7 +156,7 @@ fun StreamControlsCard(
                     mutableFloatStateOf(config.bitrateKbps.toFloat())
                 }
                 Column {
-                    val displayBitrate = ((sliderBitrate / 500f).roundToInt() * 500).coerceIn(1000, 16000)
+                    val displayBitrate = ((sliderBitrate / 500f).roundToInt() * 500).coerceIn(1000, 30000)
                     val mbps = displayBitrate / 1000f
                     Text(
                         text = "Битрейт ${config.codec.displayName}: ${String.format(Locale.US, "%.1f", mbps)} Мбит/с",
@@ -174,10 +166,10 @@ fun StreamControlsCard(
                         value = sliderBitrate,
                         onValueChange = { sliderBitrate = it },
                         onValueChangeFinished = {
-                            val rounded = ((sliderBitrate / 500f).roundToInt() * 500).coerceIn(1000, 16000)
+                            val rounded = ((sliderBitrate / 500f).roundToInt() * 500).coerceIn(1000, 30000)
                             onUpdateConfig { it.copy(bitrateKbps = rounded) }
                         },
-                        valueRange = 1000f..16000f
+                        valueRange = 1000f..30000f
                     )
                 }
             } else {
