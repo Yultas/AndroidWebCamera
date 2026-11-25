@@ -93,6 +93,7 @@ endif()
 # ----------------------------------------------------------------------------
 add_executable(awc-vcam
     src/vcam-host.cpp
+    src/vcam-decoder.cpp
     src/vcam-shm.cpp
     "${AWC_OBS_SRC_DIR}/awc-adb.cpp"
     "${AWC_OBS_SRC_DIR}/awc-client.cpp"
@@ -122,6 +123,7 @@ if(BUILD_TESTS)
     enable_testing()
     add_executable(test_vcam
         tests/test_vcam.cpp
+        src/vcam-decoder.cpp
         src/vcam-shm.cpp
         src/vcam-convert.cpp
         "${AWC_OBS_SRC_DIR}/awc-client.cpp"

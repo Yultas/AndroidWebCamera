@@ -474,12 +474,16 @@ std::vector<VideoMode> AwcVirtualCamPin::SupportedModes()
 		{1280, 720, 30, false},
 		{1920, 1080, 30, false},
 		{1920, 1080, 60, false},
+		{3840, 2160, 30, false},
+		{3840, 2160, 60, false},
 		{640, 480, 60, false},
 		{640, 480, 30, false},
 		{1280, 720, 60, true},
 		{1280, 720, 30, true},
 		{1920, 1080, 30, true},
 		{1920, 1080, 60, true},
+		{3840, 2160, 30, true},
+		{3840, 2160, 60, true},
 		{640, 480, 60, true},
 		{640, 480, 30, true},
 	};
@@ -557,8 +561,10 @@ bool AwcVirtualCamPin::ParseMediaType(const AM_MEDIA_TYPE *pmt, VideoMode &out_m
 
 	const LONG w = bmi->biWidth;
 	const LONG h = (bmi->biHeight < 0) ? -bmi->biHeight : bmi->biHeight;
-	if (w < 160 || h < 120 || w > static_cast<LONG>(kMaxFrameWidth) ||
-	    h > static_cast<LONG>(kMaxFrameHeight) || (w & 1) != 0 || (h & 1) != 0) {
+	if (w < 160 || h < 120 || w > static_cast<LONG>(kMaxFrameDim) ||
+	    h > static_cast<LONG>(kMaxFrameDim) ||
+	    static_cast<uint64_t>(w) * static_cast<uint64_t>(h) > kMaxFramePixels ||
+	    (w & 1) != 0 || (h & 1) != 0) {
 		return false;
 	}
 
@@ -1022,15 +1028,16 @@ void AwcVirtualCamPin::StreamLoop()
 
 	const uint32_t fps = std::clamp<uint32_t>(mode.fps, 5, 120);
 	const REFERENCE_TIME frame_duration_100ns = 10000000LL / static_cast<REFERENCE_TIME>(fps);
-	const auto frame_interval = std::chrono::microseconds(1000000LL / static_cast<int64_t>(fps));
 	const uint32_t frame_bytes = FrameByteSize(mode);
 	const uint32_t rgb_stride = CalcRgb24Stride(mode.width);
 	const uint32_t yuy2_stride = mode.width * 2u;
 
 	VcamShmReader shm;
 	I420FrameSnapshot snapshot;
+	std::vector<uint8_t> cached_converted(frame_bytes);
+	uint64_t cached_seq = 0;
 	uint64_t frame_index = 0;
-	auto next_deadline = std::chrono::steady_clock::now();
+	auto start_tp = std::chrono::steady_clock::now();
 
 	while (streaming_.load()) {
 		if (!shm.IsOpen()) {
@@ -1047,17 +1054,24 @@ void AwcVirtualCamPin::StreamLoop()
 		const long buf_size = sample->GetSize();
 		if (SUCCEEDED(sample->GetPointer(&buf)) && buf &&
 		    buf_size >= static_cast<long>(frame_bytes)) {
-			const bool has_live = shm.IsOpen() && shm.ReadLatestFrame(snapshot);
+			bool frame_updated = false;
+			const bool has_live = shm.IsOpen() && shm.ReadFrameIfUpdated(snapshot, frame_updated);
 			if (has_live && !snapshot.i420.empty()) {
-				if (mode.is_yuy2) {
-					ConvertI420ToYuy2(snapshot.i420.data(), snapshot.width, snapshot.height,
-							  buf, mode.width, mode.height, yuy2_stride);
-				} else {
-					ConvertI420ToRgb24(snapshot.i420.data(), snapshot.width, snapshot.height,
-							   snapshot.full_range, buf, mode.width, mode.height,
-							   rgb_stride, true);
+				if (frame_updated || snapshot.seq != cached_seq) {
+					if (mode.is_yuy2) {
+						ConvertI420ToYuy2(snapshot.i420.data(), snapshot.width, snapshot.height,
+								  cached_converted.data(), mode.width, mode.height,
+								  yuy2_stride);
+					} else {
+						ConvertI420ToRgb24(snapshot.i420.data(), snapshot.width, snapshot.height,
+								   snapshot.full_range, cached_converted.data(),
+								   mode.width, mode.height, rgb_stride, true);
+					}
+					cached_seq = snapshot.seq;
 				}
+				std::memcpy(buf, cached_converted.data(), frame_bytes);
 			} else {
+				cached_seq = 0;
 				if (mode.is_yuy2) {
 					RenderStandbyYuy2(buf, mode.width, mode.height, yuy2_stride, frame_index);
 				} else {
@@ -1082,15 +1096,24 @@ void AwcVirtualCamPin::StreamLoop()
 			sample->Release();
 		}
 
-		next_deadline += frame_interval;
-		const auto now = std::chrono::steady_clock::now();
-		if (next_deadline > now) {
-			const auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(next_deadline - now).count();
-			if (wait_ms > 0) {
-				Sleep(static_cast<DWORD>(wait_ms));
+		const auto next_deadline =
+			start_tp + std::chrono::nanoseconds(
+					   (static_cast<int64_t>(frame_index) * 1000000000LL) /
+					   static_cast<int64_t>(fps));
+		auto now = std::chrono::steady_clock::now();
+		if (now < next_deadline) {
+			const auto rem_us =
+				std::chrono::duration_cast<std::chrono::microseconds>(next_deadline - now).count();
+			if (rem_us > 2000) {
+				Sleep(static_cast<DWORD>((rem_us - 1000) / 1000));
 			}
-		} else if (now - next_deadline > frame_interval * 4) {
-			next_deadline = now;
+			while (streaming_.load() && std::chrono::steady_clock::now() < next_deadline) {
+				SwitchToThread();
+			}
+		} else if (now - next_deadline > std::chrono::milliseconds(100)) {
+			start_tp = now - std::chrono::nanoseconds(
+						 (static_cast<int64_t>(frame_index) * 1000000000LL) /
+						 static_cast<int64_t>(fps));
 		}
 	}
 

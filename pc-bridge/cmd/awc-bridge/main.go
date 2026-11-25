@@ -39,6 +39,7 @@ func run(args []string) error {
 	rotateFlag := fs.String("rotate", "auto", "Поворот для v4l2: auto (как на телефоне), 0, 90, 180, 270")
 	mirrorFlag := fs.String("mirror", "auto", "Отражение по горизонтали для v4l2: auto, true, false")
 	codecFlag := fs.String("codec", "auto", "Предпочтительный кодек потока: auto, h264, h265, av1, mjpeg")
+	hwaccelFlag := fs.String("hwaccel", "none", "Аппаратное декодирование FFmpeg для v4l2: none, auto, vaapi, cuda, qsv")
 	adbPath := fs.String("adb", "", "Явный путь к бинарнику adb")
 	ffmpegPath := fs.String("ffmpeg", "", "Явный путь к бинарнику ffmpeg")
 	openBrowser := fs.Bool("open", false, "Автоматически открыть веб-интерфейс в браузере")
@@ -134,12 +135,9 @@ func run(args []string) error {
 		return err
 	}
 
-	if requestedCodec != "" && !strings.EqualFold(status.Codec, requestedCodec) {
-		updated, err := api.UpdateConfig(ctx, baseURL, map[string]any{"codec": requestedCodec})
-		if err != nil {
-			return fmt.Errorf("не удалось переключить кодек на %s: %w", requestedCodec, err)
-		}
-		status = updated
+	status, err = ensureCodec(ctx, api, baseURL, status, &requestedCodec)
+	if err != nil {
+		return err
 	}
 
 	printConnectionSummary(baseURL, status)
@@ -168,12 +166,9 @@ func run(args []string) error {
 			if err != nil {
 				return v4l2.Options{}, err
 			}
-			if requestedCodec != "" && !strings.EqualFold(st.Codec, requestedCodec) {
-				updated, err := api.UpdateConfig(reqCtx, baseURL, map[string]any{"codec": requestedCodec})
-				if err != nil {
-					return v4l2.Options{}, fmt.Errorf("не удалось переключить кодек на %s: %w", requestedCodec, err)
-				}
-				st = updated
+			st, err = ensureCodec(reqCtx, api, baseURL, st, &requestedCodec)
+			if err != nil {
+				return v4l2.Options{}, err
 			}
 			rot, err := v4l2.ResolveRotation(*rotateFlag, st.Rotation)
 			if err != nil {
@@ -189,6 +184,7 @@ func run(args []string) error {
 				Device:     dev.Path,
 				Rotation:   rot,
 				Mirror:     mirror,
+				HWAccel:    *hwaccelFlag,
 				FFmpegPath: ffmpegBin,
 			}, nil
 		}, os.Stderr)
@@ -213,9 +209,37 @@ func resolveMirror(flagVal string, statusMirror bool) (bool, error) {
 	}
 }
 
+func ensureCodec(ctx context.Context, api *client.Client, baseURL string, st client.Status, requestedCodec *string) (client.Status, error) {
+	if requestedCodec == nil || *requestedCodec == "" {
+		return st, nil
+	}
+	want := *requestedCodec
+	activeCanon, _ := client.NormalizeCodec(st.Codec)
+	if activeCanon == want {
+		return st, nil
+	}
+	if !st.IsCodecSupported(want) {
+		return st, fmt.Errorf("кодек %s не поддерживается этим устройством", strings.ToUpper(want))
+	}
+	updated, err := api.UpdateConfig(ctx, baseURL, map[string]any{"codec": want})
+	if err != nil {
+		return st, fmt.Errorf("не удалось переключить кодек на %s: %w", want, err)
+	}
+	updatedCanon, _ := client.NormalizeCodec(updated.Codec)
+	if updatedCanon != want {
+		fmt.Fprintf(os.Stderr, "[awc-bridge] Телефон оставил кодек %s вместо %s (автооткат режима); продолжаем с %s\n",
+			strings.ToUpper(updated.Codec), strings.ToUpper(want), strings.ToUpper(updated.Codec))
+		*requestedCodec = ""
+	}
+	return updated, nil
+}
+
 func printConnectionSummary(baseURL string, st client.Status) {
 	fmt.Println("------------------------------------------------------------")
 	fmt.Printf("Камера:       %s (%dx%d @ %d fps, %s)\n", st.CameraName, st.Width, st.Height, st.FPS, strings.ToUpper(st.Codec))
+	if codecs := st.SupportedCodecNames(); len(codecs) > 0 {
+		fmt.Printf("Кодеки:       %s\n", strings.Join(codecs, ", "))
+	}
 	fmt.Printf("Веб-плеер:    %s/\n", baseURL)
 	fmt.Printf("OBS / VLC:    %s\n", client.StreamURL(baseURL, st.Codec))
 	fmt.Printf("MJPEG URL:    %s/stream.mjpg\n", baseURL)

@@ -85,6 +85,15 @@ func TestGetStatusAndUpdateConfig(t *testing.T) {
 	if !st.Streaming || st.Width != 1920 || st.Codec != "h264" || len(st.SupportedCodecs) != 4 {
 		t.Fatalf("unexpected status: %+v", st)
 	}
+	if !st.IsCodecSupported("h264") || !st.IsCodecSupported("hevc") || !st.IsCodecSupported("mjpeg") {
+		t.Fatalf("expected h264, hevc, mjpeg to be supported")
+	}
+	if st.IsCodecSupported("av1") || st.IsCodecSupported("vp9") {
+		t.Fatalf("expected av1 and vp9 to be unsupported")
+	}
+	if names := st.SupportedCodecNames(); len(names) != 3 {
+		t.Fatalf("expected 3 supported codec names (excluding av1), got %v", names)
+	}
 
 	updated, err := c.UpdateConfig(context.Background(), srv.URL, map[string]any{"codec": "h265"})
 	if err != nil {

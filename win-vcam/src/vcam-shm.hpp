@@ -12,10 +12,13 @@ constexpr uint32_t kShmMagic = 0x41574356u; // "AWCV"
 constexpr uint32_t kShmVersion = 1u;
 constexpr uint32_t kShmSlotCount = 2u;
 
-// Maximum supported frame size in shared memory: 3840x2160 planar I420 (12,441,600 bytes).
+// Maximum supported frame size in shared memory: up to 8,294,400 pixels (e.g. 3840x2160 landscape
+// OR 2160x3840 portrait 4K, 1440x2560 portrait QHD, etc.) = 12,441,600 bytes in planar I420.
+constexpr uint32_t kMaxFrameDim = 3840u;
 constexpr uint32_t kMaxFrameWidth = 3840u;
-constexpr uint32_t kMaxFrameHeight = 2160u;
-constexpr uint32_t kMaxI420Bytes = (kMaxFrameWidth * kMaxFrameHeight * 3u) / 2u;
+constexpr uint32_t kMaxFrameHeight = 3840u;
+constexpr uint64_t kMaxFramePixels = 3840ull * 2160ull;
+constexpr uint32_t kMaxI420Bytes = static_cast<uint32_t>((kMaxFramePixels * 3ull) / 2ull);
 constexpr uint32_t kSlotStrideBytes = ((kMaxI420Bytes + 4095u) / 4096u) * 4096u;
 
 // Default Windows kernel object names (Local\ works across same-session x64 & x86 processes without admin).
@@ -155,6 +158,13 @@ public:
 	 */
 	bool ReadLatestFrame(I420FrameSnapshot &out_frame, uint64_t now_ms = 0,
 			     uint64_t stale_timeout_ms = kStaleTimeoutMs) const;
+
+	/**
+	 * Checks whether the writer is active/fresh and only copies the I420 payload when `seq`
+	 * has advanced past `io_frame.seq`. Avoids redundant 12.4 MB copies on repeat DirectShow ticks.
+	 */
+	bool ReadFrameIfUpdated(I420FrameSnapshot &io_frame, bool &out_updated, uint64_t now_ms = 0,
+				uint64_t stale_timeout_ms = kStaleTimeoutMs) const;
 
 	/** Waits up to `timeout_ms` for the producer event (Windows only; returns immediately elsewhere). */
 	void WaitForFrame(uint32_t timeout_ms) const;

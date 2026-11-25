@@ -1,6 +1,7 @@
 #include "awc-adb.hpp"
 #include "awc-client.hpp"
 #include "awc-decoder.hpp"
+#include "vcam-decoder.hpp"
 #include "vcam-shm.hpp"
 
 #include <atomic>
@@ -26,7 +27,7 @@
 namespace {
 
 std::atomic<bool> g_stop_requested{false};
-awc::AwcDecoder *g_active_decoder = nullptr;
+awc::vcam::VcamDecoder *g_active_decoder = nullptr;
 
 void TriggerStop()
 {
@@ -115,6 +116,7 @@ struct HostOptions {
 	std::string serial;
 	std::string adb_path;
 	std::string codec = "auto";
+	std::string hwaccel = "auto";
 	std::string rotate = "auto";
 	std::string mirror = "auto";
 	bool show_help = false;
@@ -293,6 +295,8 @@ void PrintUsage(const char *argv0)
 		<< "  --adb <path>            Explicit path to adb executable\n"
 		<< "  --codec auto|h264|h265|av1|mjpeg\n"
 		<< "                          Stream codec (default: auto from phone /api/status)\n"
+		<< "  --hwaccel auto|off|d3d11va|dxva2|cuda|qsv|vaapi\n"
+		<< "                          GPU video decoding (default: auto, falls back to CPU)\n"
 		<< "  --rotate auto|0|90|180|270\n"
 		<< "                          Frame rotation (default: auto from phone)\n"
 		<< "  --mirror auto|on|off    Horizontal mirror (default: auto from phone)\n"
@@ -346,6 +350,8 @@ bool ParseArgs(int argc, char **argv, HostOptions &opts, std::string &out_error)
 			if (!need_val(opts.adb_path)) return false;
 		} else if (arg == "--codec") {
 			if (!need_val(opts.codec)) return false;
+		} else if (arg == "--hwaccel") {
+			if (!need_val(opts.hwaccel)) return false;
 		} else if (arg == "--rotate") {
 			if (!need_val(opts.rotate)) return false;
 		} else if (arg == "--mirror") {
@@ -505,6 +511,41 @@ int main(int argc, char **argv)
 				if (!norm.empty()) {
 					active_codec = norm;
 				}
+			} else if (awc::NormalizeCodec(status.codec) != active_codec) {
+				// Requested codec differs from the phone's active one: verify support, then switch via /api/config.
+				bool supported = status.supported_codecs.empty();
+				for (const auto &ci : status.supported_codecs) {
+					if (awc::NormalizeCodec(ci.id) == active_codec) {
+						supported = ci.supported;
+						break;
+					}
+				}
+				if (!supported) {
+					std::cerr << "[awc-vcam] Codec '" << active_codec
+						  << "' is not supported by this phone; using phone's current codec.\n";
+					active_codec = awc::NormalizeCodec(status.codec);
+					opts.codec = "auto";
+				} else {
+					awc::ConfigPatch patch;
+					patch.has_codec = true;
+					patch.codec = active_codec;
+					awc::DeviceStatus updated{};
+					std::string upd_err;
+					if (awc::HttpClient::UpdateConfig(target_host, opts.port, patch, 2500, updated, upd_err)) {
+						const std::string now = awc::NormalizeCodec(updated.codec);
+						if (!now.empty() && now != active_codec) {
+							std::cerr << "[awc-vcam] Phone kept codec '" << now
+								  << "' (automatic mode fallback); following it.\n";
+							active_codec = now;
+							opts.codec = "auto"; // stop re-posting the failing codec on reconnect
+						}
+						if (updated.fps > 0) status.fps = updated.fps;
+						status.rotation = updated.rotation;
+						status.mirrored = updated.mirrored;
+					} else {
+						std::cerr << "[awc-vcam] Failed to switch codec: " << upd_err << "\n";
+					}
+				}
 			}
 			if (status.fps > 0) {
 				stream_fps = static_cast<uint32_t>(status.fps);
@@ -536,10 +577,13 @@ int main(int argc, char **argv)
 			  << ", mirror=" << (active_mirror ? "on" : "off")
 			  << ", fps=" << stream_fps << ")\n";
 
-		awc::AwcDecoder decoder;
+		awc::vcam::VcamDecoder decoder;
 		g_active_decoder = &decoder;
 
-		awc::AwcDecoder::Options dec_opts;
+		awc::vcam::VcamDecoder::Options dec_opts;
+		dec_opts.host = target_host;
+		dec_opts.port = opts.port;
+		dec_opts.hwaccel = opts.hwaccel;
 		dec_opts.url = stream_url;
 		dec_opts.codec = active_codec;
 		dec_opts.open_timeout_ms = 4000;
@@ -571,7 +615,8 @@ int main(int argc, char **argv)
 				if (shm.PublishFrame(in) && !printed_first_frame) {
 					printed_first_frame = true;
 					std::cout << "[awc-vcam] Live! Streaming " << frame.width << "x"
-						  << frame.height << " to virtual camera 'AndroidWebCamera'.\n";
+						  << frame.height << " to virtual camera 'AndroidWebCamera' ["
+						  << decoder.ActiveBackendLabel() << "].\n";
 				}
 			},
 			dec_err, &decoded_frames);

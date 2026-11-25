@@ -15,6 +15,7 @@ type Options struct {
 	Device     string
 	Rotation   int
 	Mirror     bool
+	HWAccel    string
 	FFmpegPath string
 }
 
@@ -70,22 +71,29 @@ func BuildFFmpegArgsForOutput(opts Options, outputFormat, outputTarget string) [
 		args = append(args,
 			"-fflags", "nobuffer",
 			"-flags", "low_delay",
+			"-probesize", "4194304",
 		)
 	case "av1", "av01":
 		// Omit -fflags nobuffer for IVF/AV1 so libdav1d retains the initial Sequence Header OBU during probe.
+		// 4 MB probesize accommodates 4K @ 30-40 Mbps keyframes without truncation.
 		args = append(args,
 			"-flags", "low_delay",
 			"-analyzeduration", "500000",
-			"-probesize", "262144",
+			"-probesize", "4194304",
 		)
 	default:
-		// H.264 / H.265: 128KB probe balances fast startup on static scenes with high-bitrate 1080p/4K IDR frames.
+		// H.264 / H.265: 4 MB probesize ensures large 4K @ 30-40 Mbps IDR frames parse cleanly on startup.
 		args = append(args,
 			"-fflags", "nobuffer",
 			"-flags", "low_delay",
 			"-analyzeduration", "1000000",
-			"-probesize", "131072",
+			"-probesize", "4194304",
 		)
+	}
+
+	hw := strings.ToLower(strings.TrimSpace(opts.HWAccel))
+	if hw != "" && hw != "none" && hw != "off" && hw != "false" {
+		args = append(args, "-hwaccel", hw)
 	}
 
 	if strings.HasPrefix(opts.StreamURL, "http://") || strings.HasPrefix(opts.StreamURL, "https://") {
@@ -122,7 +130,7 @@ func BuildFFmpegArgsForOutput(opts Options, outputFormat, outputTarget string) [
 	}
 
 	if outputFormat == "v4l2" {
-		args = append(args, "-pix_fmt", "yuyv422")
+		args = append(args, "-fps_mode", "passthrough", "-pix_fmt", "yuyv422")
 	}
 	args = append(args, "-f", outputFormat, outputTarget)
 	return args

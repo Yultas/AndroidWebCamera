@@ -42,11 +42,11 @@ func TestBuildFFmpegArgsAllCodecs(t *testing.T) {
 	wantH264 := []string{
 		"-nostdin", "-hide_banner", "-loglevel", "warning",
 		"-fflags", "nobuffer", "-flags", "low_delay",
-		"-analyzeduration", "1000000", "-probesize", "131072",
+		"-analyzeduration", "1000000", "-probesize", "4194304",
 		"-rw_timeout", "5000000",
 		"-f", "h264", "-i", "http://127.0.0.1:8080/stream.h264",
 		"-vf", "transpose=1,hflip",
-		"-pix_fmt", "yuyv422",
+		"-fps_mode", "passthrough", "-pix_fmt", "yuyv422",
 		"-f", "v4l2", "/dev/video4",
 	}
 	if !reflect.DeepEqual(gotH264, wantH264) {
@@ -59,15 +59,17 @@ func TestBuildFFmpegArgsAllCodecs(t *testing.T) {
 		Device:    "/dev/video4",
 		Rotation:  270,
 		Mirror:    false,
+		HWAccel:   "vaapi",
 	})
 	wantH265 := []string{
 		"-nostdin", "-hide_banner", "-loglevel", "warning",
 		"-fflags", "nobuffer", "-flags", "low_delay",
-		"-analyzeduration", "1000000", "-probesize", "131072",
+		"-analyzeduration", "1000000", "-probesize", "4194304",
+		"-hwaccel", "vaapi",
 		"-rw_timeout", "5000000",
 		"-f", "hevc", "-i", "http://127.0.0.1:8080/stream.h265",
 		"-vf", "transpose=2",
-		"-pix_fmt", "yuyv422",
+		"-fps_mode", "passthrough", "-pix_fmt", "yuyv422",
 		"-f", "v4l2", "/dev/video4",
 	}
 	if !reflect.DeepEqual(gotH265, wantH265) {
@@ -84,11 +86,11 @@ func TestBuildFFmpegArgsAllCodecs(t *testing.T) {
 	wantAv1 := []string{
 		"-nostdin", "-hide_banner", "-loglevel", "warning",
 		"-flags", "low_delay",
-		"-analyzeduration", "500000", "-probesize", "262144",
+		"-analyzeduration", "500000", "-probesize", "4194304",
 		"-rw_timeout", "5000000",
 		"-f", "ivf", "-i", "http://127.0.0.1:8080/stream.av1",
 		"-vf", "hflip",
-		"-pix_fmt", "yuyv422",
+		"-fps_mode", "passthrough", "-pix_fmt", "yuyv422",
 		"-f", "v4l2", "/dev/video4",
 	}
 	if !reflect.DeepEqual(gotAv1, wantAv1) {
@@ -105,10 +107,11 @@ func TestBuildFFmpegArgsAllCodecs(t *testing.T) {
 	wantMjpeg := []string{
 		"-nostdin", "-hide_banner", "-loglevel", "warning",
 		"-fflags", "nobuffer", "-flags", "low_delay",
+		"-probesize", "4194304",
 		"-rw_timeout", "5000000",
 		"-f", "mpjpeg", "-i", "http://127.0.0.1:8080/stream.mjpg",
 		"-vf", "transpose=2,transpose=2",
-		"-pix_fmt", "yuyv422",
+		"-fps_mode", "passthrough", "-pix_fmt", "yuyv422",
 		"-f", "v4l2", "/dev/video4",
 	}
 	if !reflect.DeepEqual(gotMjpeg, wantMjpeg) {

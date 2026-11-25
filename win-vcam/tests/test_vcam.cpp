@@ -1,6 +1,7 @@
 #include "awc-decoder.hpp"
 #include "vcam-convert.hpp"
 #include "vcam-shm.hpp"
+#include "vcam-decoder.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -256,6 +257,49 @@ void TestFfmpegE2EPipeline()
 	std::filesystem::remove(h264_path, ec);
 }
 
+void TestPortrait4kAndUpdateDetection()
+{
+	using namespace awc::vcam;
+	// Rotated 4K / QHD portrait frames must fit the SHM slot; oversize frames must be rejected.
+	CHECK(CalcI420Size(2160, 3840) == 12441600u);
+	CHECK(CalcI420Size(3840, 2160) == 12441600u);
+	CHECK(CalcI420Size(1440, 2560) == 5529600u);
+	CHECK(CalcI420Size(3840, 3840) == 0u);
+	CHECK(CalcI420Size(4096, 2160) == 0u);
+
+	std::vector<uint8_t> backing(kShmTotalBytes, 0);
+	VcamShmWriter writer;
+	VcamShmReader reader;
+	CHECK(writer.AttachMemory(backing.data(), backing.size()));
+	CHECK(reader.AttachMemory(backing.data(), backing.size()));
+
+	auto frame = MakeSolidI420(2160, 3840, 120, 100, 150);
+	I420FrameInput in{};
+	in.y = frame.data();
+	in.u = frame.data() + 2160u * 3840u;
+	in.v = in.u + 1080u * 1920u;
+	in.stride_y = 2160;
+	in.stride_u = 1080;
+	in.stride_v = 1080;
+	in.width = 2160;
+	in.height = 3840;
+	in.fps_num = 60;
+	in.fps_den = 1;
+	CHECK(writer.PublishFrame(in, 10000));
+
+	I420FrameSnapshot snap;
+	bool updated = false;
+	CHECK(reader.ReadFrameIfUpdated(snap, updated, 10100));
+	CHECK(updated);
+	CHECK(snap.width == 2160 && snap.height == 3840);
+	updated = true;
+	CHECK(reader.ReadFrameIfUpdated(snap, updated, 10200));
+	CHECK(!updated); // same seq: no redundant 12 MB copy
+	CHECK(writer.PublishFrame(in, 10300));
+	CHECK(reader.ReadFrameIfUpdated(snap, updated, 10400));
+	CHECK(updated);
+}
+
 } // namespace
 
 int main()
@@ -263,6 +307,7 @@ int main()
 	TestShmRoundTripAndStaleness();
 	TestI420ToRgb24AndScaling();
 	TestI420ToYuy2AndStandby();
+	TestPortrait4kAndUpdateDetection();
 	TestFfmpegE2EPipeline();
 
 	if (g_failures > 0) {

@@ -54,10 +54,13 @@ uint32_t CalcI420Size(uint32_t width, uint32_t height)
 	if (width < 2 || height < 2 || (width & 1u) != 0 || (height & 1u) != 0) {
 		return 0;
 	}
-	if (width > kMaxFrameWidth || height > kMaxFrameHeight) {
+	if (width > kMaxFrameDim || height > kMaxFrameDim) {
 		return 0;
 	}
 	const uint64_t y_bytes = static_cast<uint64_t>(width) * static_cast<uint64_t>(height);
+	if (y_bytes > kMaxFramePixels) {
+		return 0;
+	}
 	const uint64_t total = (y_bytes * 3u) / 2u;
 	if (total == 0 || total > kMaxI420Bytes) {
 		return 0;
@@ -375,6 +378,42 @@ bool VcamShmReader::ReadLatestFrame(I420FrameSnapshot &out_frame, uint64_t now_m
 			out_frame.seq = seq_before;
 			return true;
 		}
+	}
+	return false;
+}
+
+bool VcamShmReader::ReadFrameIfUpdated(I420FrameSnapshot &io_frame, bool &out_updated,
+				       uint64_t now_ms, uint64_t stale_timeout_ms) const
+{
+	out_updated = false;
+	if (!base_) {
+		return false;
+	}
+	const auto *hdr = reinterpret_cast<const VcamShmHeader *>(base_);
+	if (VolatileLoad(&hdr->magic) != kShmMagic || VolatileLoad(&hdr->version) != kShmVersion) {
+		return false;
+	}
+	if (VolatileLoad(&hdr->writer_active) == 0u) {
+		return false;
+	}
+
+	const uint64_t ts_now = (now_ms > 0) ? now_ms : CurrentTimeMs();
+	const uint64_t hb = VolatileLoad(&hdr->heartbeat_ms);
+	if (hb == 0 || (ts_now > hb && (ts_now - hb) > stale_timeout_ms)) {
+		return false;
+	}
+
+	const uint64_t seq_cur = VolatileLoad(&hdr->seq);
+	if (seq_cur == 0) {
+		return false;
+	}
+	if (seq_cur == io_frame.seq && !io_frame.i420.empty()) {
+		return true;
+	}
+
+	if (ReadLatestFrame(io_frame, ts_now, stale_timeout_ms)) {
+		out_updated = true;
+		return true;
 	}
 	return false;
 }

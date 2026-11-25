@@ -153,6 +153,41 @@ func (c *Client) WaitForReady(ctx context.Context, baseURL string, interval time
 	}
 }
 
+// IsCodecSupported reports whether codec is advertised as supported by /api/status.
+// Returns true when SupportedCodecs is empty (compatibility with older servers).
+func (st Status) IsCodecSupported(codec string) bool {
+	if len(st.SupportedCodecs) == 0 {
+		return true
+	}
+	canon, ok := NormalizeCodec(codec)
+	if !ok {
+		return false
+	}
+	for _, ci := range st.SupportedCodecs {
+		id, idOK := NormalizeCodec(ci.ID)
+		if idOK && id == canon {
+			return ci.Supported
+		}
+	}
+	return false
+}
+
+// SupportedCodecNames returns display names of codecs marked Supported == true.
+func (st Status) SupportedCodecNames() []string {
+	var out []string
+	for _, ci := range st.SupportedCodecs {
+		if !ci.Supported {
+			continue
+		}
+		label := strings.TrimSpace(ci.Name)
+		if label == "" {
+			label = strings.ToUpper(ci.ID)
+		}
+		out = append(out, label)
+	}
+	return out
+}
+
 // StreamURL returns the raw media endpoint for the given codec.
 func StreamURL(baseURL, codec string) string {
 	base := strings.TrimRight(baseURL, "/")
