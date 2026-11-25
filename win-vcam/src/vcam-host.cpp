@@ -7,6 +7,8 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -17,6 +19,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace {
@@ -53,6 +57,57 @@ void PosixSignalHandler(int)
 }
 #endif
 
+std::filesystem::path GetExecutableDir()
+{
+	std::error_code ec;
+#ifdef _WIN32
+	char buf[MAX_PATH] = {};
+	const DWORD len = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+	if (len > 0 && len < MAX_PATH) {
+		return std::filesystem::path(buf).parent_path();
+	}
+#else
+	char buf[4096] = {};
+	const ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+	if (len > 0) {
+		buf[len] = '\0';
+		return std::filesystem::path(buf).parent_path();
+	}
+#endif
+	return std::filesystem::current_path(ec);
+}
+
+std::string FindBundledAdbExecutable()
+{
+	const auto exe_dir = GetExecutableDir();
+	std::error_code ec;
+#ifdef _WIN32
+	const std::filesystem::path candidates[] = {
+		exe_dir / "adb.exe",
+		exe_dir / "platform-tools" / "adb.exe",
+	};
+#else
+	const std::filesystem::path candidates[] = {
+		exe_dir / "adb",
+		exe_dir / "platform-tools" / "adb",
+	};
+#endif
+	for (const auto &p : candidates) {
+		if (std::filesystem::is_regular_file(p, ec)) {
+			return p.string();
+		}
+	}
+	return {};
+}
+
+std::string Trim(const std::string &s)
+{
+	const size_t first = s.find_first_not_of(" \t\r\n");
+	if (first == std::string::npos) return {};
+	const size_t last = s.find_last_not_of(" \t\r\n");
+	return s.substr(first, last - first + 1);
+}
+
 struct HostOptions {
 	std::string mode = "usb"; // "usb" or "wifi"
 	std::string host;
@@ -63,13 +118,172 @@ struct HostOptions {
 	std::string rotate = "auto";
 	std::string mirror = "auto";
 	bool show_help = false;
+	bool interactive = false;
 };
+
+struct SavedConfig {
+	std::string mode = "usb";
+	std::string host;
+	int port = 8080;
+};
+
+std::filesystem::path ConfigFilePath()
+{
+	return GetExecutableDir() / "awc-vcam.cfg";
+}
+
+SavedConfig LoadSavedConfig()
+{
+	SavedConfig cfg;
+	std::ifstream in(ConfigFilePath());
+	if (!in.is_open()) {
+		return cfg;
+	}
+	std::string line;
+	while (std::getline(in, line)) {
+		line = Trim(line);
+		if (line.empty() || line[0] == '#') continue;
+		const size_t eq = line.find('=');
+		if (eq == std::string::npos) continue;
+		const std::string key = Trim(line.substr(0, eq));
+		const std::string val = Trim(line.substr(eq + 1));
+		if (key == "mode" && (val == "usb" || val == "wifi")) {
+			cfg.mode = val;
+		} else if (key == "host") {
+			cfg.host = val;
+		} else if (key == "port") {
+			try {
+				const int p = std::stoi(val);
+				if (p >= 1 && p <= 65535) cfg.port = p;
+			} catch (...) {
+			}
+		}
+	}
+	return cfg;
+}
+
+void SaveConfig(const SavedConfig &cfg)
+{
+	std::ofstream out(ConfigFilePath(), std::ios::trunc);
+	if (!out.is_open()) {
+		return;
+	}
+	out << "mode=" << cfg.mode << "\n";
+	out << "host=" << cfg.host << "\n";
+	out << "port=" << cfg.port << "\n";
+}
+
+bool RunInteractiveMenu(HostOptions &opts)
+{
+	SavedConfig saved = LoadSavedConfig();
+	const int default_choice = (saved.mode == "wifi" && !saved.host.empty()) ? 2 : 1;
+
+	std::cout
+		<< "====================================================\n"
+		<< "  AndroidWebCamera - Windows Virtual Camera Host\n"
+		<< "====================================================\n\n"
+		<< "Select connection mode:\n"
+		<< "  [1] USB (automatic ADB tunnel)\n"
+		<< "  [2] Wi-Fi / USB Tethering (connect by IP)";
+	if (!saved.host.empty()) {
+		std::cout << " [last: " << saved.host << ":" << saved.port << "]";
+	}
+	std::cout
+		<< "\n"
+		<< "  [0] Exit\n\n";
+
+	while (!g_stop_requested.load()) {
+		std::cout << "Choice [" << default_choice << "]: " << std::flush;
+		std::string line;
+		if (!std::getline(std::cin, line)) {
+			return false;
+		}
+		line = Trim(line);
+		int choice = default_choice;
+		if (!line.empty()) {
+			if (line == "0" || line == "q" || line == "Q" || line == "exit") {
+				return false;
+			} else if (line == "1" || line == "usb") {
+				choice = 1;
+			} else if (line == "2" || line == "wifi") {
+				choice = 2;
+			} else {
+				std::cout << "Please enter 1, 2, or 0.\n";
+				continue;
+			}
+		}
+
+		if (choice == 1) {
+			opts.mode = "usb";
+			opts.port = 8080;
+			saved.mode = "usb";
+			SaveConfig(saved);
+			std::cout << "\n";
+			return true;
+		}
+
+		// choice == 2: Wi-Fi / USB Tethering
+		while (!g_stop_requested.load()) {
+			if (!saved.host.empty()) {
+				std::cout << "Phone IP or URL [" << saved.host << ":" << saved.port << "]: " << std::flush;
+			} else {
+				std::cout << "Phone IP or URL (e.g. 192.168.1.42): " << std::flush;
+			}
+			std::string ip_line;
+			if (!std::getline(std::cin, ip_line)) {
+				return false;
+			}
+			ip_line = Trim(ip_line);
+			if (ip_line.empty()) {
+				if (!saved.host.empty()) {
+					opts.mode = "wifi";
+					opts.host = saved.host;
+					opts.port = saved.port;
+					saved.mode = "wifi";
+					SaveConfig(saved);
+					std::cout << "\n";
+					return true;
+				}
+				std::cout << "IP address cannot be empty.\n";
+				continue;
+			}
+
+			int parsed_port = 0;
+			const std::string norm_host = awc::NormalizeHostInput(ip_line, &parsed_port);
+			if (norm_host.empty()) {
+				std::cout << "Invalid IP address or URL. Try again (e.g. 192.168.1.42).\n";
+				continue;
+			}
+			opts.mode = "wifi";
+			opts.host = norm_host;
+			opts.port = (parsed_port > 0) ? parsed_port : 8080;
+			saved.mode = "wifi";
+			saved.host = opts.host;
+			saved.port = opts.port;
+			SaveConfig(saved);
+			std::cout << "\n";
+			return true;
+		}
+	}
+	return false;
+}
+
+void WaitBeforeExitIfInteractive(bool interactive)
+{
+	if (!interactive) {
+		return;
+	}
+	std::cout << "\nPress Enter to close this window..." << std::flush;
+	std::string dummy;
+	std::getline(std::cin, dummy);
+}
 
 void PrintUsage(const char *argv0)
 {
 	std::cout
 		<< "AndroidWebCamera Virtual Camera Host (awc-vcam)\n\n"
 		<< "Usage:\n"
+		<< "  " << argv0 << "                 (opens interactive TUI menu)\n"
 		<< "  " << argv0 << " [options]\n\n"
 		<< "Options:\n"
 		<< "  --mode usb|wifi         Connection mode (default: usb)\n"
@@ -90,6 +304,11 @@ void PrintUsage(const char *argv0)
 
 bool ParseArgs(int argc, char **argv, HostOptions &opts, std::string &out_error)
 {
+	if (argc <= 1) {
+		opts.interactive = true;
+		return true;
+	}
+
 	for (int i = 1; i < argc; ++i) {
 		const std::string arg = argv[i];
 		auto need_val = [&](std::string &target) -> bool {
@@ -193,6 +412,14 @@ void SleepInterruptibleMs(int total_ms)
 
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
+	SetConsoleTitleA("AndroidWebCamera - Virtual Camera Host");
+	SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+#else
+	std::signal(SIGINT, PosixSignalHandler);
+	std::signal(SIGTERM, PosixSignalHandler);
+#endif
+
 	HostOptions opts;
 	std::string err;
 	if (!ParseArgs(argc, argv, opts, err)) {
@@ -204,17 +431,16 @@ int main(int argc, char **argv)
 		PrintUsage(argv[0]);
 		return 0;
 	}
-
-#ifdef _WIN32
-	SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
-#else
-	std::signal(SIGINT, PosixSignalHandler);
-	std::signal(SIGTERM, PosixSignalHandler);
-#endif
+	if (opts.interactive) {
+		if (!RunInteractiveMenu(opts)) {
+			return 0;
+		}
+	}
 
 	awc::vcam::VcamShmWriter shm;
 	if (!shm.Open(awc::vcam::kDefaultShmName, awc::vcam::kDefaultEventName, err)) {
 		std::cerr << "[awc-vcam] Failed to initialize virtual camera shared memory: " << err << "\n";
+		WaitBeforeExitIfInteractive(opts.interactive);
 		return 1;
 	}
 
@@ -232,20 +458,28 @@ int main(int argc, char **argv)
 
 		if (opts.mode == "usb") {
 			if (!adb) {
+				std::string adb_bin;
 				std::string adb_err;
-				const std::string adb_bin = awc::FindAdbExecutable(opts.adb_path, adb_err);
+				if (opts.adb_path.empty()) {
+					adb_bin = FindBundledAdbExecutable();
+				}
+				if (adb_bin.empty()) {
+					adb_bin = awc::FindAdbExecutable(opts.adb_path, adb_err);
+				}
 				if (adb_bin.empty()) {
 					std::cerr << "[awc-vcam] Waiting for adb: " << adb_err << "\n";
 					SleepInterruptibleMs(2500);
 					continue;
 				}
+				std::cout << "[awc-vcam] Using ADB: " << adb_bin << "\n";
 				adb = std::make_unique<awc::AdbManager>(adb_bin);
 			}
 
 			std::string resolved_serial;
 			std::string fwd_err;
 			if (!adb->SetupForward(opts.serial, opts.port, 8080, resolved_serial, fwd_err)) {
-				std::cerr << "[awc-vcam] USB waiting: " << fwd_err << "\n";
+				std::cerr << "[awc-vcam] USB waiting: " << fwd_err
+					  << " (check USB Debugging prompt on phone)\n";
 				shm.MarkInactive();
 				SleepInterruptibleMs(2000);
 				continue;

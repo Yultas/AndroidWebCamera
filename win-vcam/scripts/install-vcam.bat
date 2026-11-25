@@ -40,7 +40,7 @@ if exist "awc-vcam-filter32.dll" (
 if "%FAILED%"=="0" (
     echo.
     echo Done! "AndroidWebCamera" is now available in VTube Studio, OBS, Discord, and Zoom.
-    echo Run awc-vcam.exe --mode usb   (or --mode wifi --host PHONE_IP) to start streaming.
+    echo Double-click awc-vcam.exe to choose USB or Wi-Fi and start streaming.
 ) else (
     echo.
     echo Installation completed with errors.

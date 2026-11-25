@@ -243,9 +243,20 @@ jobs:
             }
           }
 
-          # Smoke-test packaged awc-vcam.exe from $pkg to ensure zero missing DLLs
+          # Bundle official Google Android Platform Tools (adb.exe + USB DLLs) for out-of-the-box USB mode
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/platform-tools-latest-windows.zip" -OutFile "C:\platform-tools.zip"
+          Expand-Archive -Path "C:\platform-tools.zip" -DestinationPath "C:\platform-tools-extract" -Force
+          foreach ($f in @("adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll")) {
+            $src = Join-Path "C:\platform-tools-extract\platform-tools" $f
+            if (-not (Test-Path $src)) { throw "Missing $f in platform-tools-latest-windows.zip" }
+            Copy-Item $src $pkg -Force
+          }
+
+          # Smoke-test packaged awc-vcam.exe and bundled adb.exe from $pkg to ensure zero missing DLLs
           & "$pkg/awc-vcam.exe" --help
           if ($LASTEXITCODE -ne 0) { throw "Packaged awc-vcam.exe failed smoke test!" }
+          & "$pkg/adb.exe" version
+          if ($LASTEXITCODE -ne 0) { throw "Bundled adb.exe failed smoke test!" }
 
           Compress-Archive -Path $pkg -DestinationPath "win-vcam/android-webcamera-win-vcam-x64.zip" -Force
 
